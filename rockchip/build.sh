@@ -27,12 +27,9 @@ PACKAGES="$PACKAGES openssh-sftp-server"
 PACKAGES="$PACKAGES luci-i18n-dockerman-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-samba4-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-smartdns-zh-cn"
-PACKAGES="$PACKAGES
-luci-app-unblockneteasemusic"
-PACKAGES="$PACKAGES
-luci-i18n-adbyby-plus-zh-cn"
-PACKAGES="$PACKAGES
-luci-i18n-wifischedule-zh-cn"
+PACKAGES="$PACKAGES luci-app-unblockneteasemusic"
+PACKAGES="$PACKAGES luci-i18n-adbyby-plus-zh-cn"
+PACKAGES="$PACKAGES luci-i18n-wifischedule-zh-cn"
 
 
 # 构建镜像
