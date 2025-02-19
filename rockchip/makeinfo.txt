@@ -86,7 +86,7 @@ friendlyarm_nanopi-r4s-enterprise:
     SupportedDevices: friendlyarm,nanopi-r4s-enterprise
 friendlyarm_nanopi-r5c:
     FriendlyARM NanoPi R5C
-    Packages: kmod-r8125 kmod-rtw88-8822ce rtl8822ce-firmware wpad-openssl iwinfo kmod-mt7921e kmod-mt7921-firmwarekmod-mt7921-common
+    Packages: kmod-r8125 kmod-rtw88-8822ce rtl8822ce-firmware wpad-openssl iwinfo kmod-mt7921e kmod-mt7921-firmware kmod-mt7921-common
     hasImageMetadata: 1
     SupportedDevices: friendlyarm,nanopi-r5c
 friendlyarm_nanopi-r5s:
