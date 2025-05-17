@@ -140,7 +140,7 @@ jobs:
           cd ${{ github.workspace }} || exit
           cp bin/targets/rockchip/armv8/*.img.gz ./    
           for file in *.img.gz; do
-           .echo "正在校验: $file"
+            echo "正在校验: $file"
             sha256sum "$file" > "${file}.sha256"
             sha256sum -c "${file}.sha256" || exit 1
             mv "$file" "${file/.img.gz/}-${{ env.BUILD_DATE }}.img.gz"
