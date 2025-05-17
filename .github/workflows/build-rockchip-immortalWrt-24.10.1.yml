@@ -142,16 +142,31 @@ jobs:
             sha256sum "$file" > "$file.sha256"
           done
 
+      - name: Create Git Tag
+        id: buildtag
+        run: |
+          TAG_NAME="v${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_ENV
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git tag -a "$TAG_NAME" -m "Release v${{ env.FW_VERSION }} built on ${{ env.BUILD_DATE }}"
+          git push origin "$TAG_NAME"
+
+      - name: Debug - Check Tag
+        run: |
+          echo "Tag used is: ${{ env.tag_name }}"
+          git tag
+          
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
         with:
-           tag_name: v${{ env.FW_VERSION }}-${{ env.BUIDL_DATE }}
-           name: ImmortWrt-Rockchip-${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
-           files: |
+          tag_name: ${{ env.tag_name }}
+          name: ImmortWrt-Rockchip ${{ env.tag_name }}
+          files: |
             ${{ github.workspace }}/release_artifacts/*.img.gz
             ${{ github.workspace }}/release_artifacts/*.sha256
-           body_path: ${{ github.workspace }}/info.md
-           draft: false
-           make_latest: true
+          body_path: ${{ github.workspace }}/info.md
+          draft: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
