@@ -144,17 +144,14 @@ jobs:
 
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
-        if: success() || failure()
         with:
-          tag_name: v${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
-          name: ImmortWrt-Rockchip-${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
-          文件: |
+           tag_name: v${{ env.FW_VERSION }}-${{ env.BUIDL_DATE }}
+           name: ImmortWrt-Rockchip-${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
+           文件: |
             ${{ github.workspace }}/release_artifacts/*.img.gz
             ${{ github.workspace }}/release_artifacts/*.sha256
-          body: |
-            🧬 构建时通过自动检测的版本
-            ⏱ 自动生成于 ${{ env.BUILD_DATE }}
-          draft: false
-          latest: true
+           body_path: ${{ github.workspace }}/info.md
+           draft: false
+           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
