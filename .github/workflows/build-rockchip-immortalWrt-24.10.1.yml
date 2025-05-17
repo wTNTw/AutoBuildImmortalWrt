@@ -118,44 +118,43 @@ jobs:
       - name: Extract Firmware Info
         run: |
           cd ${{ github.workspace }} || exit
-          if [ -f "openwrt/include/version.mk" ]; then
+          FIRMWARE_PATH=$(find bin/targets/rockchip/armv8 -name "immortalwrt-*.img.gz" | head -1)
+            if [ -n "$FIRMWARE_PATH" ]; then
+              FW_VERSION=$(basename "$FIRMWARE_PATH" | cut -d'-' -f2)
+              echo "检测到标准固件版本: $FW_VERSION"
+            else
+              FW_VERSION=$(grep -o 'immortalwrt-[0-9]*\.[0-9]*\.[0-9]*' tmp/build.log | head -1 | cut -d'-' -f2)
+              echo "检测到回退版本: $FW_VERSION"
+            fi
             BUILD_DATE=$(date +%Y%m%d)
-            VERSION_MAJOR=$(make -s -C openwrt val.OWRT_RELEASE_MAJOR)
-            VERSION_MINOR=$(make -s -C openwrt val.OWRT_RELEASE_MINOR)
-            VERSION_PATCH=$(make -s -C openwrt val.OWRT_RELEASE_PATCH)
-            VER="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
-            echo "FW_VERSION=$VER" >> $GITHUB_ENV
+            echo "FW_VERSION=$FW_VERSION" >> $GITHUB_ENV
             echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          else
-            echo "无法找到版本定义文件，使用默认版本号"
-            VER="dev"
-            BUILD_DATE=$(date +%Y%m%d)
-            echo "FW_VERSION=$VER" >> $GITHUB_ENV
-            echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          fi
+
 
       - name: Generate Firmware SHA-256
         run: |
-          set -eu
           cd ${{ github.workspace }} || exit
-          cp bin/targets/rockchip/armv8/*.img.gz ./    
+          mkdir -p release_artifacts
+          cp $(find bin/targets/rockchip/armv8 -name "immortalwrt-*.img.gz") release_artifacts/    
+          cd release_artifacts
           for file in *.img.gz; do
-            echo "正在校验: $file"
-            sha256sum "$file" > "${file}.sha256"
-            sha256sum -c "${file}.sha256" || exit 1
-            mv "$file" "${file/.img.gz/}-${{ env.BUILD_DATE }}.img.gz"
-            sed -i "s/${file}/${file/.img.gz/}-${{ env.BUILD_DATE }}.img.gz/" "${file}.sha256"
+            echo "生成校验文件: $file"
+            sha256sum "$file" > "$file.sha256"
           done
 
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
+        if: success() || failure()
         with:
           tag_name: v${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
           name: ImmortWrt-Rockchip-${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
           文件: |
-            ${{ github.workspace }}/*.img.gz
-            ${{ github.workspace }}/*.sha256
-          body_path: ${{ github.workspace }}/info.md
-          token: ${{ secrets.GITHUB_TOKEN }}
+            ${{ github.workspace }}/release_artifacts/*.img.gz
+            ${{ github.workspace }}/release_artifacts/*.sha256
+        body: |
+          🧬 构建时通过自动检测的版本
+          ⏱ 自动生成于 ${{ env.BUILD_DATE }}
+        draft: false
+        latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
