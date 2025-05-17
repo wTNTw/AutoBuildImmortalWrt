@@ -147,7 +147,7 @@ jobs:
         with:
            tag_name: v${{ env.FW_VERSION }}-${{ env.BUIDL_DATE }}
            name: ImmortWrt-Rockchip-${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
-           文件: |
+           files: |
             ${{ github.workspace }}/release_artifacts/*.img.gz
             ${{ github.workspace }}/release_artifacts/*.sha256
            body_path: ${{ github.workspace }}/info.md
