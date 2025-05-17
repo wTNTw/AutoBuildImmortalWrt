@@ -149,5 +149,6 @@ jobs:
           body_path: ${{ github.workspace }}/info.md
           draft: false
           latest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
