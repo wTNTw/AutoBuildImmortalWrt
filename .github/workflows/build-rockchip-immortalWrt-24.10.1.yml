@@ -119,16 +119,17 @@ jobs:
         run: |
           cd ${{ github.workspace }} || exit
           FIRMWARE_PATH=$(find bin/targets/rockchip/armv8 -name "immortalwrt-*.img.gz" | head -1)
-            if [ -n "$FIRMWARE_PATH" ]; then
-              FW_VERSION=$(basename "$FIRMWARE_PATH" | cut -d'-' -f2)
-              echo "检测到标准固件版本: $FW_VERSION"
-            else
-              FW_VERSION=$(grep -o 'immortalwrt-[0-9]*\.[0-9]*\.[0-9]*' tmp/build.log | head -1 | cut -d'-' -f2)
-              echo "检测到回退版本: $FW_VERSION"
-            fi
-            BUILD_DATE=$(date +%Y%m%d)
-            echo "FW_VERSION=$FW_VERSION" >> $GITHUB_ENV
-            echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+          if [ -n "$FIRMWARE_PATH" ]; then
+            FW_VERSION=$(basename "$FIRMWARE_PATH" | cut -d'-' -f2)
+            echo "检测到标准固件版本: $FW_VERSION"
+          else
+            FW_VERSION=$(grep -o 'immortalwrt-[0-9]*\.[0-9]*\.[0-9]*' tmp/build.log | head -1 | cut -d'-' -f2)
+            echo "检测到回退版本: $FW_VERSION"
+          fi
+
+          BUILD_DATE=$(date +'%Y%m%d-%H%M%S')
+          echo "FW_VERSION=$FW_VERSION" >> $GITHUB_ENV
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
 
 
       - name: Generate Firmware SHA-256
@@ -145,7 +146,7 @@ jobs:
       - name: Create Git Tag
         id: buildtag
         run: |
-          TAG_NAME="v${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}"
+          TAG_NAME="v${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}-${{ github.run_number }}"
           echo "tag_name=$TAG_NAME" >> $GITHUB_ENV
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
