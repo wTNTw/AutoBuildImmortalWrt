@@ -151,10 +151,10 @@ jobs:
           文件: |
             ${{ github.workspace }}/release_artifacts/*.img.gz
             ${{ github.workspace }}/release_artifacts/*.sha256
-        body: |
-          🧬 构建时通过自动检测的版本
-          ⏱ 自动生成于 ${{ env.BUILD_DATE }}
-        draft: false
-        latest: true
+          body: |
+            🧬 构建时通过自动检测的版本
+            ⏱ 自动生成于 ${{ env.BUILD_DATE }}
+          draft: false
+          latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
