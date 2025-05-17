@@ -118,44 +118,36 @@ jobs:
       - name: Extract Firmware Info
         run: |
           cd ${{ github.workspace }} || exit
-          if [ -f "openwrt/include/version.mk" ]; then
-            BUILD_DATE=$(date +%Y%m%d)
-            VERSION_MAJOR=$(make -s -C openwrt val.OWRT_RELEASE_MAJOR)
-            VERSION_MINOR=$(make -s -C openwrt val.OWRT_RELEASE_MINOR)
-            VERSION_PATCH=$(make -s -C openwrt val.OWRT_RELEASE_PATCH)
-            VER="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
-            echo "FW_VERSION=$VER" >> $GITHUB_ENV
-            echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          else
-            echo "无法找到版本定义文件，使用默认版本号"
-            VER="dev"
-            BUILD_DATE=$(date +%Y%m%d)
-            echo "FW_VERSION=$VER" >> $GITHUB_ENV
-            echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          fi
+          FIRMWARE_NAME=$(ls bin/targets/rockchip/armv8/immortalwrt*-rockchip-armv8-*.img.gz | head -1)
+          FW_VERSION=$(echo "$FIRMWARE_NAME" | sed -E 's/.*immortalwrt-([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          BUILD_DATE=$(date +%Y%m%d)
+          echo "FW_VERSION=$FW_VERSION" >> $GITHUB_ENV
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+
 
       - name: Generate Firmware SHA-256
         run: |
+           #!/usr/bin/env sh
           set -eu
           cd ${{ github.workspace }} || exit
-          cp bin/targets/rockchip/armv8/*.img.gz ./    
+          mkdir -p artifacts
+          cp bin/targets/rockchip/armv8/immortalwrt*-rockchip-armv8-*.img.gz artifacts/    
+          cd artifacts
           for file in *.img.gz; do
             echo "正在校验: $file"
-            sha256sum "$file" > "${file}.sha256"
-            sha256sum -c "${file}.sha256" || exit 1
-            mv "$file" "${file/.img.gz/}-${{ env.BUILD_DATE }}.img.gz"
-            sed -i "s/${file}/${file/.img.gz/}-${{ env.BUILD_DATE }}.img.gz/" "${file}.sha256"
+            sha256sum "$file" > "$file.sha256"
           done
 
-      - name: Upload ImmortWrt as release assets
-        uses: softprops/action-gh-release@v2.2.1
+      - name: Upload Firmware
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
           name: ImmortWrt-Rockchip-${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
           文件: |
-            ${{ github.workspace }}/*.img.gz
-            ${{ github.workspace }}/*.sha256
+            ${{ github.workspace }}/artifacts/*.img.gz
+            ${{ github.workspace }}/artifacts/*.sha256
           body_path: ${{ github.workspace }}/info.md
-          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
