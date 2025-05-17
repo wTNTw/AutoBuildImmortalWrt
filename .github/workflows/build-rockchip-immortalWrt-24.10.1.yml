@@ -151,7 +151,7 @@ jobs:
         uses: softprops/action-gh-release@v2.2.1
         with:
           tag_name: v${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
-          name: ImmortWrt-Rockchip-${{ env.FW_VERSION }}-${{ env.BUILD_DATfiles
+          name: ImmortWrt-Rockchip-${{ env.FW_VERSION }}-${{ env.BUILD_DATE }}
           文件: |
             ${{ github.workspace }}/*.img.gz
             ${{ github.workspace }}/*.sha256
