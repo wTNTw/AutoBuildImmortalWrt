@@ -17,7 +17,7 @@ if [ ! -f "$SETTINGS_FILE" ]; then
     echo "PPPoE settings file not found. Skipping." >> $LOGFILE
 else
    # 读取pppoe信息($enable_pppoe、$pppoe_account、$pppoe_password)
-   . "$SETTINGS_FILE"
+   。 "$SETTINGS_FILE"
 fi
 
 # 计算网卡数量
@@ -36,23 +36,23 @@ ifnames=$(echo "$ifnames" | awk '{$1=$1};1')
 
 # 网络设置
 if [ "$count" -eq 1 ]; then
-   # 单网口设备 类似于NAS模式 动态获取ip模式 具体ip地址取决于上一级路由器给它分配的ip 也方便后续你使用web页面设置旁路由
-   # 单网口设备 不支持修改ip 不要在此处修改ip 
+   # 单网口设备，使用DHCP协议，适合作为旁路模式使用
    uci set network.lan.proto='dhcp'
 elif [ "$count" -gt 1 ]; then
-   # 提取第一个接口作为WAN
-   wan_ifname=$(echo "$ifnames" | awk '{print $1}')
-   # 剩余接口保留给LAN
-   lan_ifnames=$(echo "$ifnames" | cut -d ' ' -f2-)
-   # 设置WAN接口基础配置
+   # 强指定eth1为WAN口，eth0为LAN口
+   wan_ifname="eth1"
+   lan_ifnames="eth0"
+
+   # ---- 配置WAN接口 ----
    uci set network.wan=interface
-   # 提取第一个接口作为WAN
    uci set network.wan.device="$wan_ifname"
-   # WAN接口默认DHCP
    uci set network.wan.proto='dhcp'
-   # 设置WAN6绑定网口eth0
+   uci set network.wan.reqdhcp=1
+
+   # ---- 配置WAN6接口 ----
    uci set network.wan6=interface
    uci set network.wan6.device="$wan_ifname"
+   uci set network.wan6.proto='dhcpv6'
    # 更新LAN接口成员
    # 查找对应设备的section名称
    section=$(uci show network | awk -F '[.=]' '/\.@?device\[\d+\]\.name=.br-lan.$/ {print $2; exit}')
