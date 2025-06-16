@@ -17,7 +17,7 @@ if [ ! -f "$SETTINGS_FILE" ]; then
     echo "PPPoE settings file not found. Skipping." >> $LOGFILE
 else
    # 读取pppoe信息($enable_pppoe、$pppoe_account、$pppoe_password)
-   . "$SETTINGS_FILE"
+   。 "$SETTINGS_FILE"
 fi
 
 # 计算网卡数量
@@ -40,33 +40,30 @@ if [ "$count" -eq 1 ]; then
    # 单网口设备 不支持修改ip 不要在此处修改ip 
    uci set network.lan.proto='dhcp'
 elif [ "$count" -gt 1 ]; then
-   # 提取第一个接口作为WAN
-   wan_ifname=$(echo "$ifnames" | awk '{print $1}')
-   # 剩余接口保留给LAN
-   lan_ifnames=$(echo "$ifnames" | cut -d ' ' -f2-)
+   # 设置 eth1 为 WAN，其他接口为 LAN
+   wan_ifname="eth1"
+   lan_ifnames=$(echo "$ifnames" | sed 's/eth1//')
+
    # 设置WAN接口基础配置
    uci set network.wan=interface
-   # 提取第一个接口作为WAN
    uci set network.wan.device="$wan_ifname"
-   # WAN接口默认DHCP
    uci set network.wan.proto='dhcp'
-   # 设置WAN6绑定网口eth0
+
    uci set network.wan6=interface
    uci set network.wan6.device="$wan_ifname"
+
    # 更新LAN接口成员
-   # 查找对应设备的section名称
    section=$(uci show network | awk -F '[.=]' '/\.@?device\[\d+\]\.name=.br-lan.$/ {print $2; exit}')
    if [ -z "$section" ]; then
       echo "error：cannot find device 'br-lan'." >> $LOGFILE
    else
-      # 删除原来的ports列表
       uci -q delete "network.$section.ports"
-      # 添加新的ports列表
       for port in $lan_ifnames; do
          uci add_list "network.$section.ports"="$port"
       done
-      echo "ports of device 'br-lan' are update." >> $LOGFILE
+      echo "ports of device 'br-lan' are updated." >> $LOGFILE
    fi
+fi
    # LAN口设置静态IP
    uci set network.lan.proto='static'
    # 多网口设备 支持修改为别的ip地址,别的地址应该是网关地址，形如192.168.xx.1 项目说明里都强调过。
