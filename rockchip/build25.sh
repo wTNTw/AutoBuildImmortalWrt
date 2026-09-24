@@ -25,19 +25,12 @@ cat /home/build/immortalwrt/files/etc/config/pppoe-settings
 if [ -z "$CUSTOM_PACKAGES" ]; then
   echo "⚪️ 未选择 任何第三方软件包"
 else
-  # ============= 同步第三方插件库==============
-  # 同步第三方软件仓库run/apk
-  echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
-  git clone --depth=1 https://github.com/wukongdaily/apk.git /tmp/store-apk-repo
-
-  # 拷贝 run/arm64 下所有 run 文件和apk文件 到 extra-packages 目录
-  mkdir -p /home/build/immortalwrt/extra-packages
-  cp -r /tmp/store-apk-repo/run/arm64/* /home/build/immortalwrt/extra-packages/
-
-  echo "✅ Run files copied to extra-packages:"
-  # 解压并拷贝apk到packages目录
-  sh shell/apk-prepare-packages.sh
-  ls -lah /home/build/immortalwrt/packages/
+  # 【重要】25.12 使用 apk。ImageBuilder 的本地 packages/ 目录只能通过 packages.adb 索引
+  # 被 apk 看到，而该索引在本镜偯中不存在也无法生成（实测报 "No such file or directory"），
+  # 因此「把零散 .apk 丢进 packages/」的做法在本工作流中完全无效，只会得到 no such package。
+  # 所以这里不再同步 wukongdaily 的 apk bundle。
+  # 第三方组件改用其官方 apk 仓库（自带 ADB 索引），见下方 iStore 段落。
+  echo "ℹ️ 第三方包将仅从官方 apk 仓库解析：$CUSTOM_PACKAGES"
 fi
 
 # 输出调试信息
@@ -116,6 +109,30 @@ PACKAGES="$PACKAGES luci-app-cpufreq"
 # ======== shell/custom-packages.sh =======
 # 合并imm仓库以外的第三方插件
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
+
+# ============ iStore 官方 apk 仓库 ============
+# iStore 为 apk 平台（OpenWrt 25.12+）单独维护了自带 ADB 索引的仓库，
+# 仓库地址来自其官方安装器 is-opkg 中的 FEEDS_SERVER 定义：
+#   USE_APK 分支 -> https://istore.istoreos.com/repo-apk  (索引 packages.adb)
+# 与 24.10 的 ipk 仓库(.../repo/...)不同，这里是原生 .apk，可直接被 apk 解析，
+# 所以无需依赖本地 packages/ 索引，也不会有 no such package 问题。
+if echo " $PACKAGES " | grep -q " luci-app-store "; then
+    # luci-app-store 是 Lua/CBI 应用；25.12 的 JS 版 LuCI 默认不带 cbi.lua，
+    # 与 iStore 官方 reinstall 脚本的兜底逻辑一致，这里显式补上兼容层
+    PACKAGES="$PACKAGES luci-compat luci-lua-runtime"
+
+    REPO_FILE="/home/build/immortalwrt/repositories"
+    [ -f "$REPO_FILE" ] || REPO_FILE="repositories"
+    ISTORE_APK_INDEX="https://istore.istoreos.com/repo-apk/all/store/packages.adb"
+    if [ -f "$REPO_FILE" ] && ! grep -qF "$ISTORE_APK_INDEX" "$REPO_FILE"; then
+        printf '\n%s\n' "$ISTORE_APK_INDEX" >> "$REPO_FILE"
+        echo "✅ 已追加 iStore 官方 apk 仓库: $ISTORE_APK_INDEX"
+    else
+        echo "ℹ️ iStore 仓库已在列表中，或 repositories 文件不存在"
+    fi
+    echo "---- 当前 repositories ----"
+    cat "$REPO_FILE" 2>/dev/null
+fi
 
 # 构建镜像
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"

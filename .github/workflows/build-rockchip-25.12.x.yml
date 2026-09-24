@@ -97,10 +97,11 @@ on:
           - '4G'
       enable_store:
         description: |
-          集成 store 商店（注意：apk/25.12 路径的第三方集成尚未完成，建议保持关闭）
+          集成 iStore 商店（25.12/apk 走 iStore 官方 apk 仓库 repo-apk/all/store，
+          该仓库自带 ADB 索引，可直接被 apk 解析）
         required: false
         type: boolean
-        default: false
+        default: true
       include_docker:
         description: |
           是否编译 Docker 插件
