@@ -290,6 +290,29 @@ if [ -x /usr/sbin/fstrim ]; then
     /etc/init.d/cron enable 2>/dev/null
 fi
 
+# 12. DNS 层收窄与缓存调优
+# 默认仍由 dnsmasq 作为唯一解析器（不接入 oxidns / AdGuardHome 等本地解析链），
+# 仅对其缓存与上游来源做收窄。
+if uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1; then
+    # 缓存调优：默认 cachesize=150、min_cache_ttl=0，对家庭/办公规模明显偏小
+    uci -q set dhcp.@dnsmasq[0].cachesize='10000'
+    uci -q set dhcp.@dnsmasq[0].min_cache_ttl='120'
+
+    # 只服务内网客户端，不对外提供递归解析
+    uci -q set dhcp.@dnsmasq[0].localservice='1'
+
+    # 上游收窄：不再使用运营商 / DHCP 下发的 resolv.conf.auto，只信任显式指定的国内公共 DNS。
+    # 好处是上游集合固定可预期，不会因上级设备下发的异常 DNS 而把解析拖入本地链路。
+    uci -q set dhcp.@dnsmasq[0].noresolv='1'
+    uci -q delete dhcp.@dnsmasq[0].server
+    uci -q add_list dhcp.@dnsmasq[0].server='223.5.5.5'
+    uci -q add_list dhcp.@dnsmasq[0].server='223.6.6.6'
+    uci -q add_list dhcp.@dnsmasq[0].server='119.29.29.29'
+    uci -q add_list dhcp.@dnsmasq[0].server='180.76.76.76'
+
+    uci commit dhcp
+fi
+
 # 设置编译作者信息
 FILE_PATH="/etc/openwrt_release"
 NEW_DESCRIPTION="Packaged by wukongdaily"
