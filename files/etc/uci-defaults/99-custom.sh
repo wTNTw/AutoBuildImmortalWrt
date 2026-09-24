@@ -269,4 +269,36 @@ if command -v wifi >/dev/null 2>&1; then
     fi
 fi
 
+# 自动配置社区第三方预编译软件包源 (涵盖 kenzok8 / passwall / 各种社区常用插件)
+if [ -f /etc/opkg.conf ]; then
+    # 注释 check_signature，避免第三方无签名源在更新时报错
+    sed -i 's/^option check_signature/# option check_signature/' /etc/opkg.conf
+fi
+
+if [ -d /etc/opkg ]; then
+    CUSTOMFEEDS="/etc/opkg/customfeeds.conf"
+    opkg_arch=$(opkg print-architecture 2>/dev/null | awk 'NR>1 {print $2}' | tail -n 1)
+    [ -z "$opkg_arch" ] && opkg_arch="aarch64_generic"
+
+    case "$opkg_arch" in
+        *x86_64*)
+            cat << 'EOF' > "$CUSTOMFEEDS"
+src/gz community_kiddin9 https://dl.openwrt.ai/packages-24.10/x86_64/kiddin9
+EOF
+            ;;
+        *aarch64*|*arm64*|*cortex-a53*)
+            cat << 'EOF' > "$CUSTOMFEEDS"
+src/gz community_kiddin9 https://dl.openwrt.ai/packages-24.10/aarch64_generic/kiddin9
+src/gz community_cortex_a53 https://dl.openwrt.ai/packages-24.10/aarch64_cortex-a53/kiddin9
+EOF
+            ;;
+        *)
+            cat << EOF > "$CUSTOMFEEDS"
+src/gz community_kiddin9 https://dl.openwrt.ai/packages-24.10/${opkg_arch}/kiddin9
+EOF
+            ;;
+    esac
+    echo "Community customfeeds configured for architecture: $opkg_arch" >> $LOGFILE
+fi
+
 exit 0
