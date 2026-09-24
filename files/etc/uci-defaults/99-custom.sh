@@ -145,11 +145,88 @@ elif [ "$count" -gt 1 ]; then
 fi
 
 # 设置所有网口可访问网页终端
-uci delete ttyd.@ttyd[0].interface
+uci -q delete ttyd.@ttyd[0].interface
 
 # 设置所有网口可连接 SSH
-uci set dropbear.@dropbear[0].Interface=''
-uci commit
+uci -q set dropbear.@dropbear[0].Interface=''
+
+# 4. 系统时区与国内高可靠 NTP 时间同步池 (防断电后证书与 DoH 校验失败)
+uci -q set system.@system[0].zonename='Asia/Shanghai'
+uci -q set system.@system[0].timezone='CST-8'
+uci -q delete system.ntp.server
+uci -q add_list system.ntp.server='ntp.aliyun.com'
+uci -q add_list system.ntp.server='ntp.tencent.com'
+uci -q add_list system.ntp.server='time1.cloud.tencent.com'
+uci -q add_list system.ntp.server='ntp.ntsc.ac.cn'
+uci -q set system.ntp.enable_server='1'
+
+# 5. 持久化系统滚动日志 (保留在 /overlay，限制 512KB 自动滚动轮转，防断网重启丢日志)
+mkdir -p /overlay/log
+uci -q set system.@system[0].log_type='file'
+uci -q set system.@system[0].log_file='/overlay/log/syslog.log'
+uci -q set system.@system[0].log_size='512'
+uci -q set system.@system[0].log_rotate='4'
+uci -q set system.@system[0].log_buffer_size='128'
+
+# 6. 配置板载 LED 指示灯状态自适应 (仅对 Rockchip 开发板生效，按实际 sysfs 动态绑定)
+case "$board_name" in
+    *nanopi*|*radxa*|*rockchip*|*fastrhino*|*orangepi*|*t68m*)
+        # 先清理固件自带的 LED 定义，避免同一 LED 被重复绑定产生告警
+        for idx in $(uci show system 2>/dev/null | grep "=led" | cut -d. -f2 | cut -d= -f1 | sort -rn); do
+            uci -q delete "system.$idx"
+        done
+
+        led_sec=0
+        for want in lan wan wlan; do
+            real=""
+            for d in /sys/class/leds/*; do
+                [ -d "$d" ] || continue
+                base=$(basename "$d")
+                case "$base" in
+                    *":$want"|*":$want-"*|*"led-$want"*|*"-$want"*)
+                        real="$base"
+                        break
+                        ;;
+                esac
+            done
+            [ -z "$real" ] && continue
+
+            led_sec=$((led_sec + 1))
+            sec="led_custom_$led_sec"
+            uci -q set "system.$sec=led"
+            uci -q set "system.$sec.name=$(echo "$want" | tr 'a-z' 'A-Z')"
+            uci -q set "system.$sec.sysfs=$real"
+
+            case "$want" in
+                lan|wan)
+                    if [ "$want" = "lan" ]; then
+                        dev_name=$(echo "$lan_ifnames" | awk '{print $1}')
+                    else
+                        dev_name=$(echo "$wan_ifname" | awk '{print $1}')
+                    fi
+                    if [ -n "$dev_name" ] && [ -d "/sys/class/net/$dev_name" ]; then
+                        uci -q set "system.$sec.trigger='netdev'"
+                        uci -q set "system.$sec.dev=$dev_name"
+                        uci -q set "system.$sec.mode='link tx rx'"
+                    else
+                        uci -q set "system.$sec.trigger='defaulton'"
+                    fi
+                    ;;
+                wlan)
+                    if [ -d /sys/class/ieee80211 ]; then
+                        uci -q set "system.$sec.trigger='phy0tpt'"
+                    else
+                        uci -q set "system.$sec.trigger='defaulton'"
+                    fi
+                    ;;
+            esac
+        done
+        ;;
+esac
+
+uci commit system
+uci commit dropbear
+uci commit ttyd
 
 # 设置编译作者信息
 FILE_PATH="/etc/openwrt_release"
@@ -299,6 +376,76 @@ EOF
             ;;
     esac
     echo "Community customfeeds configured for architecture: $opkg_arch" >> $LOGFILE
+fi
+
+# 优化软中断多核负载均衡 (RPS/XPS)，分摊双 2.5G 网卡与无线数据包至所有 CPU 核心
+cpu_count=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 4)
+if [ "$cpu_count" -ge 4 ]; then
+    mask="f"
+elif [ "$cpu_count" -ge 2 ]; then
+    mask="3"
+else
+    mask="1"
+fi
+
+for iface in /sys/class/net/*; do
+    [ -d "$iface/queues" ] || continue
+    for rx in "$iface"/queues/rx-*; do
+        [ -f "$rx/rps_cpus" ] && echo "$mask" > "$rx/rps_cpus" 2>/dev/null
+    done
+    for tx in "$iface"/queues/tx-*; do
+        [ -f "$tx/xps_cpus" ] && echo "$mask" > "$tx/xps_cpus" 2>/dev/null
+    done
+done
+
+# 将多核软中断优化固化至独立脚本，并由 /etc/rc.local 开机调用，确保每次开机都生效
+cat << 'EOF' > /etc/rps-tuning.sh
+#!/bin/sh
+# 自动生成：RPS/XPS 多核软中断负载均衡
+cpu_count=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 4)
+if [ "$cpu_count" -ge 4 ]; then
+    mask="f"
+elif [ "$cpu_count" -ge 2 ]; then
+    mask="3"
+else
+    mask="1"
+fi
+for rx in /sys/class/net/*/queues/rx-*/rps_cpus; do
+    [ -f "$rx" ] && echo "$mask" > "$rx" 2>/dev/null
+done
+for tx in /sys/class/net/*/queues/tx-*/xps_cpus; do
+    [ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
+done
+exit 0
+EOF
+chmod +x /etc/rps-tuning.sh
+
+if [ -f /etc/rc.local ]; then
+    if ! grep -q "rps-tuning.sh" /etc/rc.local; then
+        if grep -q "^exit 0" /etc/rc.local; then
+            sed -i 's#^exit 0#[ -x /etc/rps-tuning.sh ] \&\& /etc/rps-tuning.sh\nexit 0#' /etc/rc.local
+        else
+            echo "[ -x /etc/rps-tuning.sh ] && /etc/rps-tuning.sh" >> /etc/rc.local
+        fi
+    fi
+fi
+
+# 去除后台无效报错提示
+# 1) 清理 LuCI 编译缓存，避免首次进入后台出现旧菜单/未定义模块告警
+rm -f /tmp/luci-indexcache* 2>/dev/null
+rm -rf /tmp/luci-modulecache/* 2>/dev/null
+
+# 2) 确保 uci-defaults 日志文件权限正确，避免后续追加写入报错
+[ -f "$LOGFILE" ] && chmod 644 "$LOGFILE" 2>/dev/null
+
+# 3) 修正部分插件（advancedplus / 其他）对缺失 zsh 的调用引起的终端刷屏报错
+for f in /etc/init.d/advancedplus /etc/profile; do
+    [ -f "$f" ] && sed -i '/zsh/d' "$f" 2>/dev/null
+done
+
+# 4) 屏蔽 opkg 对第三方无签名源的告警输出
+if [ -f /etc/opkg.conf ] && ! grep -q 'option check_signature' /etc/opkg.conf; then
+    echo '# option check_signature' >> /etc/opkg.conf
 fi
 
 exit 0

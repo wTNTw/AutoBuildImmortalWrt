@@ -69,6 +69,12 @@ PACKAGES="$PACKAGES kmod-mt7921-common kmod-mt7921-firmware kmod-mt7921e"
 PACKAGES="$PACKAGES iw iwinfo wpad-openssl"
 PACKAGES="$PACKAGES kmod-btusb mt7921bt-firmware"
 
+# 存储与文件系统支持 (USB 自动挂载，NTFS/ext4/exFAT 原生驱动，磁盘维护工具)
+PACKAGES="$PACKAGES block-mount kmod-fs-ext4 kmod-fs-ntfs3 kmod-fs-exfat kmod-fs-vfat e2fsprogs kmod-usb-storage kmod-usb-storage-uas"
+
+# 内核与网络协议栈加速 (TCP BBR 拥塞控制支持)
+PACKAGES="$PACKAGES kmod-tcp-bbr"
+
 # 集成 OxiDNS (https://oxidns.org/openwrt)
 PACKAGES="$PACKAGES luci-app-oxidns luci-i18n-oxidns-zh-cn"
 
