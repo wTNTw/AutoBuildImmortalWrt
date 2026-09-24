@@ -228,6 +228,68 @@ uci commit system
 uci commit dropbear
 uci commit ttyd
 
+# 7. 开启 NAT 流量分载 (software flow offloading)
+# firewall4 已依赖 kmod-nft-offload，无需额外安装；已建立的 NAT 连接将走 nftables flowtable 快速路径。
+# 注意：硬件分载在 RK3568 上无意义，保持关闭；另若日后启用 SQM 整形，需关闭此项（分载会绕过整形队列）。
+if uci -q get firewall.@defaults[0] >/dev/null 2>&1; then
+    uci -q set firewall.@defaults[0].flow_offloading='1'
+    uci -q set firewall.@defaults[0].flow_offloading_hw='0'
+    uci commit firewall
+fi
+
+# 8. zram 内存压缩交换：作为 OOM 兜底，全程在内存中压缩，不写 eMMC
+uci -q set system.@system[0].zram_size_mb='1024'
+uci -q set system.@system[0].zram_comp_algo='lzo'
+uci commit system
+
+# 9. 监控数据持久化：nlbwmon / vnstat 默认落在 /var （tmpfs），重启即丢，改到 /overlay
+mkdir -p /overlay/nlbwmon /overlay/vnstat 2>/dev/null
+if [ -f /etc/config/nlbwmon ]; then
+    uci -q set nlbwmon.@nlbwmon[0].database_directory='/overlay/nlbwmon'
+    uci -q set nlbwmon.@nlbwmon[0].commit_interval='10m'
+    uci commit nlbwmon
+fi
+if [ -f /etc/vnstat.conf ]; then
+    # vnstat 默认数据库目录可能被注释掉，这里同时处理注释与未注释两种形式
+    sed -i 's#^[[:space:]]*;\?[[:space:]]*DatabaseDir.*#DatabaseDir "/overlay/vnstat"#' /etc/vnstat.conf
+    grep -q '^DatabaseDir' /etc/vnstat.conf || echo 'DatabaseDir "/overlay/vnstat"' >> /etc/vnstat.conf
+fi
+if [ -f /etc/config/vnstat ]; then
+    uci -q delete vnstat.@vnstat[0].interface
+    for i in $wan_ifname $lan_ifnames; do
+        dev=$(echo "$i" | awk '{print $1}')
+        [ -n "$dev" ] && [ -d "/sys/class/net/$dev" ] && uci -q add_list "vnstat.@vnstat[0].interface=$dev"
+    done
+    uci commit vnstat
+fi
+
+# 10. 服务开机启动策略
+# 直接可用的监控/优化服务：启用
+for svc in irqbalance zram nlbwmon vnstat netdata miniupnpd; do
+    if [ -x "/etc/init.d/$svc" ]; then
+        "/etc/init.d/$svc" enable 2>/dev/null
+    fi
+done
+
+# 需要用户先完成配置的服务：保持禁用，避免单网卡/单线环境下产生意外行为
+# - mwan3  : 需先添加并启用第二条 WAN（wanb），否则会接管默认路由
+# - usteer / dawn : 单射频环境下无漫游对象，且 dawn 默认启用 kicking 可能主动踢开客户端
+for svc in mwan3 usteer dawn; do
+    if [ -x "/etc/init.d/$svc" ]; then
+        "/etc/init.d/$svc" disable 2>/dev/null
+    fi
+done
+
+# 11. eMMC 定期 TRIM：每周日凌晨 4 点对全部支持 discard 的文件系统执行 fstrim
+if [ -x /usr/sbin/fstrim ]; then
+    CRON=/etc/crontabs/root
+    [ -f "$CRON" ] || touch "$CRON"
+    if ! grep -q 'fstrim' "$CRON" 2>/dev/null; then
+        echo '0 4 * * 0 /usr/sbin/fstrim -a >/dev/null 2>&1' >> "$CRON"
+    fi
+    /etc/init.d/cron enable 2>/dev/null
+fi
+
 # 设置编译作者信息
 FILE_PATH="/etc/openwrt_release"
 NEW_DESCRIPTION="Packaged by wukongdaily"
@@ -398,10 +460,12 @@ for iface in /sys/class/net/*; do
     done
 done
 
-# 将多核软中断优化固化至独立脚本，并由 /etc/rc.local 开机调用，确保每次开机都生效
-cat << 'EOF' > /etc/rps-tuning.sh
+# 将需要在每次开机重新施加的内核/挂载调优固化到独立脚本，并由 /etc/rc.local 调用
+cat << 'EOF' > /etc/boot-tuning.sh
 #!/bin/sh
-# 自动生成：RPS/XPS 多核软中断负载均衡
+# 自动生成：开机内核与 I/O 调优
+
+# 1) RPS/XPS：将网卡收发包软中断分摊到所有 CPU 核心
 cpu_count=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 4)
 if [ "$cpu_count" -ge 4 ]; then
     mask="f"
@@ -416,16 +480,37 @@ done
 for tx in /sys/class/net/*/queues/tx-*/xps_cpus; do
     [ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
 done
+
+# 2) 根文件系统以 noatime 重新挂载，减少 eMMC 上无意义的访问时间写入
+if ! awk '$2 == "/" { exit !(index($4, "noatime") > 0) }' /proc/mounts 2>/dev/null; then
+    mount -o remount,noatime / 2>/dev/null
+fi
+
+# 3) CPU 调频：优先使用 schedutil（响应更快），不可用时保持系统默认
+governor_file=/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+avail_file=/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors
+if [ -f "$governor_file" ] && [ -f "$avail_file" ]; then
+    if grep -qw schedutil "$avail_file"; then
+        for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            [ -f "$gov" ] && echo schedutil > "$gov" 2>/dev/null
+        done
+    fi
+fi
+
 exit 0
 EOF
-chmod +x /etc/rps-tuning.sh
+chmod +x /etc/boot-tuning.sh
+
+# 移除早期版本生成的 rps-tuning.sh，避免两套脚本重复
+sed -i '/rps-tuning.sh/d' /etc/rc.local 2>/dev/null
+rm -f /etc/rps-tuning.sh 2>/dev/null
 
 if [ -f /etc/rc.local ]; then
-    if ! grep -q "rps-tuning.sh" /etc/rc.local; then
+    if ! grep -q "boot-tuning.sh" /etc/rc.local; then
         if grep -q "^exit 0" /etc/rc.local; then
-            sed -i 's#^exit 0#[ -x /etc/rps-tuning.sh ] \&\& /etc/rps-tuning.sh\nexit 0#' /etc/rc.local
+            sed -i 's#^exit 0#[ -x /etc/boot-tuning.sh ] \&\& /etc/boot-tuning.sh\nexit 0#' /etc/rc.local
         else
-            echo "[ -x /etc/rps-tuning.sh ] && /etc/rps-tuning.sh" >> /etc/rc.local
+            echo "[ -x /etc/boot-tuning.sh ] && /etc/boot-tuning.sh" >> /etc/rc.local
         fi
     fi
 fi

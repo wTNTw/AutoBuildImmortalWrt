@@ -1,6 +1,10 @@
 # 支持的第三方软件列表如下 
  > 第三方软件就是ImmortalWrt仓库以外的软件包
 
+ > **已弃用插件**：`luci-app-turboacc` 与 `luci-app-attendedsysupgrade` 已从本仓库移除。
+ > 前者依赖 iptables 时代的 `kmod-ipt-offload`（官方源已无此包），其功能已由 `firewall` 原生的 `flow_offloading` 取代；
+ > 后者依赖 ASU 在线升级服务，无法复现本仓库的自定义包组合。
+
 
 | 第三方软件名称                  | 简介 / 功能描述                        | 来源 / 项目地址                                                                           |
 | --------------------- | -------------------------------- | ----------------------------------------------------------------------------------- |
@@ -12,7 +16,6 @@
 | luci-app-netwizard    | 网络配置向导插件                          | [sirpdboy/luci-app-netwizard](https://github.com/sirpdboy/luci-app-netwizard)                                                                 |
 | luci-app-partexp      | 分区扩容插件         | [sirpdboy/luci-app-partexp](https://github.com/sirpdboy/luci-app-partexp)                             |
 | luci-app-quickstart   | iStore首页和网络向导                  | [linkease/luci-app-quickstart](https://github.com/kiddin9/kwrt-packages/tree/main/luci-app-quickstart)                                                                 |
-| luci-app-turboacc     | TurboACC 网络加速器（集成BBR、shortcut）   | [chenmozhijin/turboacc](https://github.com/wukongdaily/store/tree/master/run/x86/luci-app-turboacc) |
 | luci-theme-kucat      | 酷猫主题                  | [sirpdboy/luci-theme-kucat](https://github.com/sirpdboy/luci-theme-kucat)                 |
 | luci-app-oxidns       | OxiDNS 现代化高性能 DNS 分流与防污染工具   | [svenshi/luci-app-oxidns](https://oxidns.org/openwrt)                               |
 | luci-app-nekobox               | 代理工具      | [Thaolga/luci-app-nekobox](https://github.com/Thaolga/openwrt-nekobox)       |

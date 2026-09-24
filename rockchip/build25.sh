@@ -80,6 +80,37 @@ PACKAGES="$PACKAGES luci-app-oxidns luci-i18n-oxidns-zh-cn"
 
 # 文件共享 (Samba4 协议服务)
 PACKAGES="$PACKAGES luci-i18n-samba4-zh-cn"
+
+# ========== 系统级优化组件 ==========
+# eMMC 寿命与 I/O：fstrim 定期 TRIM；zram-swap 为内存压缩交换，不写闪存
+PACKAGES="$PACKAGES fstrim zram-swap"
+# 中断分发与多队列：将网卡硬件中断分散到多个 CPU 核心
+PACKAGES="$PACKAGES irqbalance luci-app-irqbalance"
+
+# ========== 网络与多线 (双 2.5G) ==========
+# iptables-nft / ip6tables-nft：为 mwan3、sqm-scripts 提供 iptables 虚拟依赖的确定性解析
+PACKAGES="$PACKAGES iptables-nft ip6tables-nft"
+PACKAGES="$PACKAGES mwan3 luci-app-mwan3"
+PACKAGES="$PACKAGES sqm-scripts luci-app-sqm"
+PACKAGES="$PACKAGES miniupnpd-nftables luci-app-upnp"
+PACKAGES="$PACKAGES pbr luci-app-pbr"
+
+# ========== 监控与运维 ==========
+PACKAGES="$PACKAGES nlbwmon luci-app-nlbwmon"
+PACKAGES="$PACKAGES vnstat2 luci-app-vnstat2"
+PACKAGES="$PACKAGES netdata luci-app-netdata"
+PACKAGES="$PACKAGES luci-app-cpulimit"
+PACKAGES="$PACKAGES iperf3 coremark"
+
+# ========== 无线增强 (MT7921) ==========
+PACKAGES="$PACKAGES travelmate luci-app-travelmate"
+PACKAGES="$PACKAGES wifischedule luci-app-wifischedule"
+PACKAGES="$PACKAGES usteer luci-app-usteer dawn luci-app-dawn"
+
+# ========== 安全与便捷 ==========
+PACKAGES="$PACKAGES luci-app-advanced-reboot"
+PACKAGES="$PACKAGES luci-app-commands"
+PACKAGES="$PACKAGES luci-app-cpufreq"
 # ======== shell/custom-packages.sh =======
 # 合并imm仓库以外的第三方插件
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
