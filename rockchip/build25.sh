@@ -216,69 +216,60 @@ if [ "$ENABLE_OXIDNS" = "1" ]; then
     ls -la files/usr/lib/lua/luci/i18n/oxidns.zh-cn.lmo 2>/dev/null
 fi
 
-# ============ Nikki（mihomo 代理，第三方，改为文件注入）============
-# 为何不能用 apk 装：25.12 是 apk，而 ImageBuilder 无法安装第三方 .apk，
-# 且 nikki 不在 ImmortalWrt 官方源中（仅存在于社区源）。
-# 做法：从社区源 dl.openwrt.ai 取 opkg 格式 ipk，解出 data.tar.gz 铺入 files/。
-# 注意 mihomo 内核：官方包放在 /usr/libexec/mihomo-core，
-# 但 nikki 的 /etc/init.d/nikki 里固定为 PROG="/usr/bin/mihomo"，因此放到 /usr/bin/mihomo。
+# ============ Nikki（mihomo 代理，第三方）============
+# 交付方式：预置 .apk 进固件 + 首次开机用 apk 安装（不是“文件注入”）。
+#
+# 为什么这样做：
+#   - 25.12 是 apk，而 ImageBuilder **构建期**无法安装第三方 .apk：
+#     本地 packages/ 目录需要 packages.adb 索引，而该索引的生成规则会调用
+#     apk mkndx，实测在该镜像里直接段错误（exit 139），且错误被 `|| true` 掩盖；
+#   - 但**设备端** `apk add --allow-untrusted <本地 .apk 文件>` 是可用的（已在设备上验证：
+#     用户手动安装的 nikki / mihomo-meta 就是走这条路，apk 正常登记）。
+#   => 因此把 .apk 预置进固件，由首次开机脚本调用 apk 安装，包能被包管理器登记、可升级卸载。
+#
+# 源：wukongdaily/apk 仓库（其打包时 feed 路径为 /feed，与设备上看到的 origin 一致）。
+# 这里用 git clone 而非写死文件名，避免上游改名就失效。
 if [ "$ENABLE_NIKKI" = "1" ]; then
-    echo "---- Nikki: 从社区源 ipk 提取文件到 files/ ----"
-    NK_FEED="https://dl.openwrt.ai/packages-25.12/aarch64_generic/kiddin9"
-    NK_TMP=/tmp/nikki-pkgs
-    rm -rf "$NK_TMP"; mkdir -p "$NK_TMP"
+    echo "---- Nikki: 收集 apk 并预置进固件 ----"
+    NK_SRC=/tmp/wukong-apk
+    NK_DST=/home/build/immortalwrt/files/usr/share/nikki-apk
+    mkdir -p "$NK_DST"
+    rm -rf "$NK_SRC"
 
-    if curl -fsSL "$NK_FEED/Packages.gz" | gzip -dc > "$NK_TMP/Packages.txt"; then
-        echo "  已获取社区源索引（$(grep -c '^Package: ' "$NK_TMP/Packages.txt") 个包）"
+    if git clone --depth=1 https://github.com/wukongdaily/apk.git "$NK_SRC" >/dev/null 2>&1; then
+        # 1) 本来就是 .apk 的
+        find "$NK_SRC" -path '*nikki*' -name '*.apk' -exec cp -f {} "$NK_DST"/ \; 2>/dev/null
+        # 2) 打包在 makeself .run 里的
+        for r in $(find "$NK_SRC" -path '*nikki*' -name '*.run' 2>/dev/null); do
+            echo "  解包 $(basename "$r")"
+            rm -rf /tmp/nk-unpack; mkdir -p /tmp/nk-unpack
+            sh "$r" --target /tmp/nk-unpack --noexec >/dev/null 2>&1
+            find /tmp/nk-unpack -name '*.apk' -exec cp -f {} "$NK_DST"/ \; 2>/dev/null
+        done
     else
-        echo "  警告: 社区源索引获取失败，跳过 Nikki"
+        echo "  警告: 无法克隆 wukongdaily/apk，跳过 Nikki 预置"
     fi
 
-    pick_fn() { awk -v PK="$1" '$0=="Package: "PK{f=1} f&&/^Filename:/{print $2; exit}' "$NK_TMP/Packages.txt"; }
+    echo "---- 预置的 apk 清单 ----"
+    ls -la "$NK_DST" 2>/dev/null
 
-    # 1) LuCI 界面 + 服务脚本：直接解包铺入 files/
-    for p in luci-app-nikki nikki; do
-        fn=$(pick_fn "$p")
-        if [ -z "$fn" ]; then echo "  警告: 索引中未找到 $p"; continue; fi
-        d="$NK_TMP/$p"; mkdir -p "$d"
-        if curl -fsSL "$NK_FEED/$fn" -o "$d/pkg.ipk" \
-           && tar -xzf "$d/pkg.ipk" -C "$d" 2>/dev/null \
-           && [ -f "$d/data.tar.gz" ] \
-           && tar -xzf "$d/data.tar.gz" -C files/; then
-            echo "  OK $fn 已铺入 files/"
-        else
-            echo "  警告: $fn 处理失败"
-        fi
-    done
-
-    # 2) mihomo 内核：从包内 /usr/libexec/mihomo-core 取出，放到 /usr/bin/mihomo
-    fn=$(pick_fn mihomo)
-    if [ -n "$fn" ]; then
-        d="$NK_TMP/mihomo"; mkdir -p "$d"
-        if curl -fsSL "$NK_FEED/$fn" -o "$d/pkg.ipk" \
-           && tar -xzf "$d/pkg.ipk" -C "$d" 2>/dev/null \
-           && [ -f "$d/data.tar.gz" ] \
-           && tar -xzf "$d/data.tar.gz" -C "$d"; then
-            if [ -f "$d/usr/libexec/mihomo-core" ]; then
-                mkdir -p files/usr/bin
-                cp -f "$d/usr/libexec/mihomo-core" files/usr/bin/mihomo
+    # 若预置包中不含 mihomo 内核，则从上游补一个二进制到 /usr/bin/mihomo
+    # （nikki 的 /etc/init.d/nikki 固定 PROG="/usr/bin/mihomo"）
+    if ! ls "$NK_DST"/mihomo*.apk >/dev/null 2>&1; then
+        echo "  预置包中无 mihomo，改为从上游补内核二进制"
+        mkdir -p files/usr/bin
+        MH_URL=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep "browser_download_url.*linux-arm64.*\.gz" | head -n1 | cut -d '"' -f 4)
+        if [ -n "$MH_URL" ]; then
+            if wget -qO- "$MH_URL" | gzip -dc > files/usr/bin/mihomo; then
                 chmod 755 files/usr/bin/mihomo
                 echo "  OK mihomo 内核 -> files/usr/bin/mihomo ($(du -h files/usr/bin/mihomo | cut -f1))"
             else
-                echo "  警告: mihomo 包内未找到 usr/libexec/mihomo-core"
+                echo "  警告: mihomo 内核下载失败"
             fi
         else
-            echo "  警告: mihomo 包处理失败"
+            echo "  警告: 未解析到 mihomo 下载地址"
         fi
     fi
-
-    # 清理临时解包目录，避免把 usr/libexec 之类的中间产物带进 files/
-    rm -rf "$NK_TMP"
-
-    echo "---- files/ 中 Nikki 相关文件 ----"
-    ls -la files/usr/bin/mihomo files/etc/init.d/nikki files/etc/config/nikki 2>/dev/null
-    ls -la files/usr/lib/lua/luci/i18n/nikki.zh-cn.lmo 2>/dev/null
-    find files/etc/nikki files/www/luci-static/resources/view/nikki -type f 2>/dev/null | sed 's/^/  /'
 fi
 
 # 构建镜像

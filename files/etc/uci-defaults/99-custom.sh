@@ -409,10 +409,15 @@ if command -v wifi >/dev/null 2>&1; then
         for r in $radios; do
             uci set "wireless.$r.disabled=0"
             uci set "wireless.$r.country=CN"
-            # 修复 MT7921 默认只给 3 dBm 的问题：不显式设置发射功率时，
-            # 驱动会以极低功率（实测 3 dBm，约 2mW）起 AP，几乎无法使用。
-            # CN 法规下 5.15-5.35GHz 允许 30dBm，这里取 20dBm 兼顾覆盖与发热。
-            uci set "wireless.$r.txpower='20'"
+            # 关于发射功率：实测 iwinfo 报 Tx-Power=3 dBm，但已排除以下原因：
+            #   - 不是法规限制：iw reg get 显示 CN 在 5.15-5.35GHz 允许 30dBm，
+            #     且换到 5.8GHz（允许 33dBm）后仍报 3 dBm
+            #   - 不是出厂功率表缺失：mt76 的 txpower_sku 里 eeprom 档为 28~37，宽 RU 的
+            #     法规（user）档为 25~27，均健康
+            #   - 设置无线影响：uci 的 txpower 与 `iw set txpower fixed` 都无法改变该告警值
+            # 因此 3 dBm 很可能是驱动上报的默认值，而非真实发射上限。
+            # 未验证有效的“修复”不予保留（不向固件写入无依据的配置），
+            # 如需判断真实功率，应对比实测覆盖或看客户端 RSSI。
         done
 
         # 为第一个无线网络配置默认 AP
@@ -582,6 +587,24 @@ done
 for tx in /sys/class/net/*/queues/tx-*/xps_cpus; do
     [ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
 done
+
+# 6) 安装预置的第三方 apk（Nikki / mihomo）
+# 为何放在 rc.local 而不是 uci-defaults：
+#   uci-defaults 在 S10 执行，此时网络通常还未就绪，而 apk add 可能需要联网补齐依赖；
+#   这里每次开机检查一次，没装上就重试（成功后自动跳过），具备自愈能力。
+NIKKI_APK_DIR=/usr/share/nikki-apk
+if [ -d "$NIKKI_APK_DIR" ] && command -v apk >/dev/null 2>&1; then
+    if ! apk list --installed 2>/dev/null | grep -q '^nikki-'; then
+        echo "===== $(date) 安装预置 apk =====" >> "$SYSCTL_LOG"
+        apk add --allow-untrusted --no-network "$NIKKI_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1 \
+            || apk add --allow-untrusted "$NIKKI_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1
+        # nikki 的 /etc/init.d/nikki 固定用 /usr/bin/mihomo，而部分包的二进制放在 /usr/libexec/
+        for p in /usr/libexec/mihomo /usr/libexec/mihomo-core; do
+            [ -x "$p" ] && [ ! -e /usr/bin/mihomo ] && ln -sf "$p" /usr/bin/mihomo
+        done
+        echo "  结果: $(apk list --installed 2>/dev/null | grep -c '^nikki-' ) 个 nikki 相关包已安装" >> "$SYSCTL_LOG"
+    fi
+fi
 
 exit 0
 EOF
