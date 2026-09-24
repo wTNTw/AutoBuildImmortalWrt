@@ -74,9 +74,9 @@ PACKAGES="$PACKAGES luci-i18n-samba4-zh-cn"
 # 注意：本工作流（25.12 / apk）不能像 24.10 那样把零散 .apk 丢进本地 packages/ 目录，
 # 因为 apk 只能经 packages/packages.adb 索引访问该目录，详见下方「OxiDNS」段落的处理。
 
-# 集成 OxiDNS（第三方）：其 .apk 只发布在 GitHub Releases，没有在线索引，
-# 因此下载后需自行生成 apk 本地索引（packages.adb）并签名，见下方段落。
-PACKAGES="$PACKAGES luci-app-oxidns luci-i18n-oxidns-zh-cn"
+# 集成 OxiDNS（第三方）：不使用 apk 安装，而是把官方发布包的文件直接铺入 files/，
+# 详见下方「OxiDNS（第三方，改为文件注入）」段落的说明。不在 PACKAGES 中声明任何 oxidns 包。
+ENABLE_OXIDNS=1
 
 # ========== 系统级优化组件 ==========
 # eMMC 寿命与 I/O：fstrim 定期 TRIM；zram-swap 为内存压缩交换，不写闪存
@@ -150,24 +150,42 @@ if echo " $PACKAGES " | grep -q " luci-app-store "; then
     ls -la "$KEYS_DIR" 2>/dev/null
 fi
 
-# ============ OxiDNS（第三方；开源自建 apk 本地索引）============
-# apk 只能经 packages/packages.adb 索引看到 packages/ 目录，因此这里做三件事：
-#   1) 把 OxiDNS 的 .apk 下载进 packages/
-#   2) 准备本地签名密钥 keys/local-private-key.pem
-#      （ImageBuilder 的 package_index 会传 --sign 这个路径，但只有当 _check_keys 生成过后才存在；
-#        这里提前生成，同时让本地索引的签名可被 keys/ 里的公钥信任）
-#   3) 自行生成并签名索引 packages.adb
-if echo " $PACKAGES " | grep -q " luci-app-oxidns "; then
-    PKG_DIR=/home/build/immortalwrt/packages
-    KEYS_DIR=/home/build/immortalwrt/keys
-    HOST_BIN=/home/build/immortalwrt/staging_dir/host/bin
-    mkdir -p "$PKG_DIR" "$KEYS_DIR"
+# ============ OxiDNS（第三方，改为文件注入）============
+# 为何不用 apk 安装：25.12 是 apk，而 ImageBuilder 无法把第三方 .apk 装进固件：
+#   - 本地 packages/ 目录需 packages.adb 索引，而该索引的生成规则带
+#     `--sign keys/local-private-key.pem`，密钥缺失时 mkndx 直接失败，
+#     又因规则结尾是 `|| true` 且输出进了 /dev/null，错误被完全掩盖；
+#   - 即使生成了索引，镜像构建器的 apk 调用不会带 --allow-untrusted，
+#     未签名的第三方包仍可能被拒。
+# 因此改为：下载 OxiDNS 官方发布包（Architecture: all 的 .ipk，本质是 tar.gz），
+# 直接解出 data.tar.gz 铺到 files/，由 make image 的 FILES= 机制覆盖进 rootfs。
+# 文件内容与 .apk 一致（同一源码产物），且权限位会被保留。
+# 注意：这种方式下 apk 数据库不登记该包，因此不能再用 apk 卸载/升级它。
+if [ "$ENABLE_OXIDNS" = "1" ]; then
+    echo "---- OxiDNS: 从官方 ipk 提取文件到 files/ ----"
+    OXI_API=https://api.github.com/repos/svenshi/luci-app-oxidns/releases/latest
+    OXI_APP_URL=$(curl -s "$OXI_API" | grep "browser_download_url.*luci-app-oxidns.*\.ipk" | head -n1 | cut -d '"' -f 4)
+    OXI_I18N_URL=$(curl -s "$OXI_API" | grep "browser_download_url.*luci-i18n-oxidns-zh-cn.*\.ipk" | head -n1 | cut -d '"' -f 4)
 
-    echo "---- 下载 OxiDNS 的 LuCI 插件与中文语言包 (apk) ----"
-    OXIDNS_LUCI_URL=$(curl -s https://api.github.com/repos/svenshi/luci-app-oxidns/releases/latest | grep "browser_download_url.*luci-app-oxidns.*\.apk" | head -n1 | cut -d '"' -f 4)
-    OXIDNS_I18N_URL=$(curl -s https://api.github.com/repos/svenshi/luci-app-oxidns/releases/latest | grep "browser_download_url.*luci-i18n-oxidns-zh-cn.*\.apk" | head -n1 | cut -d '"' -f 4)
-    [ -n "$OXIDNS_LUCI_URL" ] && wget -q "$OXIDNS_LUCI_URL" -P "$PKG_DIR/" && echo "  OK $(basename "$OXIDNS_LUCI_URL")"
-    [ -n "$OXIDNS_I18N_URL" ] && wget -q "$OXIDNS_I18N_URL" -P "$PKG_DIR/" && echo "  OK $(basename "$OXIDNS_I18N_URL")"
+    OXI_TMP=/tmp/oxidns-pkgs
+    rm -rf "$OXI_TMP"; mkdir -p "$OXI_TMP"
+    idx=0
+    for u in "$OXI_APP_URL" "$OXI_I18N_URL"; do
+        [ -z "$u" ] && continue
+        idx=$((idx+1))
+        d="$OXI_TMP/p$idx"
+        mkdir -p "$d"
+        if wget -q "$u" -O "$d/pkg.ipk"; then
+            tar -xzf "$d/pkg.ipk" -C "$d" 2>/dev/null
+            if [ -f "$d/data.tar.gz" ] && tar -xzf "$d/data.tar.gz" -C files/; then
+                echo "  OK $(basename "$u") 已铺入 files/"
+            else
+                echo "  警告: $(basename "$u") 解包失败"
+            fi
+        else
+            echo "  警告: 下载失败 $u"
+        fi
+    done
 
     # 预置 oxidns 内核与 WebUI（与 24.10 行为一致，开箱即用，免设备端联网下载）
     echo "---- 预置 oxidns 内核与 WebUI ----"
@@ -180,30 +198,10 @@ if echo " $PACKAGES " | grep -q " luci-app-oxidns "; then
         echo "  OK oxidns core + webui 已就位"
     fi
 
-    echo "---- packages/ 现有内容 ----"
-    ls -la "$PKG_DIR" 2>/dev/null | head -n 30
-
-    if [ ! -s "$KEYS_DIR/local-private-key.pem" ] && [ -x "$HOST_BIN/openssl" ]; then
-        echo "---- 生成本地签名密钥（照搬 ImageBuilder _check_keys 的做法）----"
-        "$HOST_BIN/openssl" ecparam -name prime256v1 -genkey -noout -out "$KEYS_DIR/local-private-key.pem" 2>/dev/null
-        sed -i '1s/^/untrusted comment: Local build key\n/' "$KEYS_DIR/local-private-key.pem" 2>/dev/null
-        "$HOST_BIN/openssl" ec -in "$KEYS_DIR/local-private-key.pem" -pubout > "$KEYS_DIR/local-public-key.pem" 2>/dev/null
-        sed -i '1s/^/untrusted comment: Local build key\n/' "$KEYS_DIR/local-public-key.pem" 2>/dev/null
-    fi
-    echo "---- keys/ 内容 ----"
-    ls -la "$KEYS_DIR" 2>/dev/null | head -n 20
-
-    if [ -x "$HOST_BIN/apk" ]; then
-        echo "---- 生成并签名本地 apk 索引 ----"
-        ( cd "$PKG_DIR" && "$HOST_BIN/apk" mkndx \
-            --keys-dir "$KEYS_DIR" \
-            --sign "$KEYS_DIR/local-private-key.pem" \
-            --allow-untrusted --output packages.adb ./*.apk )
-        echo "mkndx exit=$?"
-        ls -la "$PKG_DIR/packages.adb" 2>/dev/null || echo "警告: packages.adb 未生成"
-    else
-        echo "警告: 未找到 $HOST_BIN/apk，跳过本地索引生成（将由 Makefile 的 package_index 尝试）"
-    fi
+    echo "---- files/ 中 OxiDNS 相关文件 ----"
+    ls -la files/etc/init.d/oxidns files/usr/libexec/rpcd/luci.oxidns 2>/dev/null
+    ls -la files/www/luci-static/resources/view/oxidns/ 2>/dev/null | head -n 8
+    ls -la files/usr/lib/lua/luci/i18n/oxidns.zh-cn.lmo 2>/dev/null
 fi
 
 # 构建镜像
