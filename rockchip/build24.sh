@@ -59,20 +59,19 @@ cat repositories.conf
 PACKAGES=""
 PACKAGES="$PACKAGES curl"
 PACKAGES="$PACKAGES openssh-sftp-server"
-PACKAGES="$PACKAGES luci-i18n-diskman-zh-cn"
-PACKAGES="$PACKAGES luci-i18n-package-manager-zh-cn"
-PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
+PACKAGES="$PACKAGES luci-app-diskman luci-i18n-diskman-zh-cn"
+PACKAGES="$PACKAGES luci-app-package-manager luci-i18n-package-manager-zh-cn"
+PACKAGES="$PACKAGES luci-app-firewall luci-i18n-firewall-zh-cn"
 PACKAGES="$PACKAGES luci-theme-argon"
-PACKAGES="$PACKAGES luci-app-argon-config"
-PACKAGES="$PACKAGES luci-i18n-argon-config-zh-cn"
-PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
+PACKAGES="$PACKAGES luci-app-argon-config luci-i18n-argon-config-zh-cn"
+PACKAGES="$PACKAGES luci-app-ttyd luci-i18n-ttyd-zh-cn"
 # 判断是否需要编译 Docker 插件
 if [ "$INCLUDE_DOCKER" = "yes" ]; then
-    PACKAGES="$PACKAGES luci-i18n-dockerman-zh-cn"
-    echo "Adding package: luci-i18n-dockerman-zh-cn"
+    PACKAGES="$PACKAGES luci-app-dockerman luci-i18n-dockerman-zh-cn"
+    echo "Adding package: luci-app-dockerman luci-i18n-dockerman-zh-cn"
 fi
 # 文件管理器
-PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"
+PACKAGES="$PACKAGES luci-app-filemanager luci-i18n-filemanager-zh-cn"
 
 # 硬件驱动与无线网络支持 (针对 NanoPi R5C 等设备强化 2.5G 网卡与 MT7921 Wi-Fi 6)
 PACKAGES="$PACKAGES kmod-r8125"
@@ -90,39 +89,39 @@ PACKAGES="$PACKAGES kmod-tcp-bbr"
 PACKAGES="$PACKAGES luci-app-oxidns luci-i18n-oxidns-zh-cn"
 
 # 文件共享 (Samba4 协议服务，官方源提供；UniShare 已按需求移除)
-PACKAGES="$PACKAGES luci-i18n-samba4-zh-cn"
+PACKAGES="$PACKAGES luci-app-samba4 luci-i18n-samba4-zh-cn"
 
 # ========== 系统级优化组件 ==========
 # eMMC 寿命与 I/O：fstrim 定期 TRIM；zram-swap 为内存压缩交换，不写闪存
 PACKAGES="$PACKAGES fstrim zram-swap"
 # 中断分发与多队列：将网卡硬件中断分散到多个 CPU 核心
-PACKAGES="$PACKAGES irqbalance luci-app-irqbalance"
+PACKAGES="$PACKAGES irqbalance luci-app-irqbalance luci-i18n-irqbalance-zh-cn"
 
 # ========== 网络与多线 (双 2.5G) ==========
 # iptables-nft / ip6tables-nft：为 mwan3、sqm-scripts 提供 iptables 虚拟依赖的确定性解析
 # （24.10/25.12 官方源中已无名为 iptables 的包，仅有 Provides 它的 nft/legacy 变体）
 PACKAGES="$PACKAGES iptables-nft ip6tables-nft"
-PACKAGES="$PACKAGES mwan3 luci-app-mwan3"
-PACKAGES="$PACKAGES sqm-scripts luci-app-sqm"
-PACKAGES="$PACKAGES miniupnpd-nftables luci-app-upnp"
-PACKAGES="$PACKAGES pbr luci-app-pbr"
+PACKAGES="$PACKAGES mwan3 luci-app-mwan3 luci-i18n-mwan3-zh-cn"
+PACKAGES="$PACKAGES sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn"
+PACKAGES="$PACKAGES miniupnpd-nftables luci-app-upnp luci-i18n-upnp-zh-cn"
+PACKAGES="$PACKAGES pbr luci-app-pbr luci-i18n-pbr-zh-cn"
 
 # ========== 监控与运维 ==========
-PACKAGES="$PACKAGES nlbwmon luci-app-nlbwmon"
-PACKAGES="$PACKAGES vnstat2 luci-app-vnstat2"
-PACKAGES="$PACKAGES netdata luci-app-netdata"
-PACKAGES="$PACKAGES luci-app-cpulimit"
+PACKAGES="$PACKAGES nlbwmon luci-app-nlbwmon luci-i18n-nlbwmon-zh-cn"
+PACKAGES="$PACKAGES vnstat2 luci-app-vnstat2 luci-i18n-vnstat2-zh-cn"
+PACKAGES="$PACKAGES netdata luci-app-netdata luci-i18n-netdata-zh-cn"
+PACKAGES="$PACKAGES luci-app-cpulimit luci-i18n-cpulimit-zh-cn"
 PACKAGES="$PACKAGES iperf3 coremark"
 
 # ========== 无线增强 (MT7921) ==========
-PACKAGES="$PACKAGES travelmate luci-app-travelmate"
-PACKAGES="$PACKAGES wifischedule luci-app-wifischedule"
-PACKAGES="$PACKAGES usteer luci-app-usteer dawn luci-app-dawn"
+PACKAGES="$PACKAGES travelmate luci-app-travelmate luci-i18n-travelmate-zh-cn"
+PACKAGES="$PACKAGES wifischedule luci-app-wifischedule luci-i18n-wifischedule-zh-cn"
+PACKAGES="$PACKAGES usteer luci-app-usteer luci-i18n-usteer-zh-cn dawn luci-app-dawn luci-i18n-dawn-zh-cn"
 
 # ========== 安全与便捷 ==========
-PACKAGES="$PACKAGES luci-app-advanced-reboot"
-PACKAGES="$PACKAGES luci-app-commands"
-PACKAGES="$PACKAGES luci-app-cpufreq"
+PACKAGES="$PACKAGES luci-app-advanced-reboot luci-i18n-advanced-reboot-zh-cn"
+PACKAGES="$PACKAGES luci-app-commands luci-i18n-commands-zh-cn"
+PACKAGES="$PACKAGES luci-app-cpufreq luci-i18n-cpufreq-zh-cn"
 # ======== shell/custom-packages.sh =======
 # 合并imm仓库以外的第三方插件
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
