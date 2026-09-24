@@ -57,8 +57,8 @@ PACKAGES="$PACKAGES luci-i18n-argon-config-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
 # 判断是否需要编译 Docker 插件
 if [ "$INCLUDE_DOCKER" = "yes" ]; then
-    PACKAGES="$PACKAGES luci-i18n-dockerman-zh-cn"
-    echo "Adding package: luci-i18n-dockerman-zh-cn"
+    PACKAGES="$PACKAGES luci-i18n-dockerman-zh-cn docker"
+    echo "Adding package: luci-i18n-dockerman-zh-cn docker"
 fi
 # 文件管理器
 PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"
@@ -75,11 +75,13 @@ PACKAGES="$PACKAGES block-mount kmod-fs-ext4 kmod-fs-ntfs3 kmod-fs-exfat kmod-fs
 # 内核与网络协议栈加速 (TCP BBR 拥塞控制支持)
 PACKAGES="$PACKAGES kmod-tcp-bbr"
 
-# 集成 OxiDNS (https://oxidns.org/openwrt)
-PACKAGES="$PACKAGES luci-app-oxidns luci-i18n-oxidns-zh-cn"
-
 # 文件共享 (Samba4 协议服务)
 PACKAGES="$PACKAGES luci-i18n-samba4-zh-cn"
+
+# 注意：本工作流（25.12 / apk）暂不集成第三方软件包。
+# 原因见文件头说明：apk 路径的第三方集成尚未完成，一旦把第三方包写入
+# CUSTOM_PACKAGES，就会触发下面的 store 仓库同步并导致 make image 解析失败。
+# 因此 OxiDNS、UniShare、luci-app-store 等第三方组件仅在 24.10 工作流中启用。
 
 # ========== 系统级优化组件 ==========
 # eMMC 寿命与 I/O：fstrim 定期 TRIM；zram-swap 为内存压缩交换，不写闪存
@@ -118,26 +120,6 @@ PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
 # 构建镜像
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
-
-# 若构建 OxiDNS 则下载 luci 插件包并预置内核与 WebUI
-if echo "$PACKAGES" | grep -q "luci-app-oxidns"; then
-    echo "✅ 已选择 luci-app-oxidns，下载 luci-app-oxidns 及其语言包"
-    mkdir -p /home/build/immortalwrt/packages
-    OXIDNS_LUCI_URL=$(curl -s https://api.github.com/repos/svenshi/luci-app-oxidns/releases/latest | grep "browser_download_url.*luci-app-oxidns.*\.apk" | head -n1 | cut -d '"' -f 4)
-    OXIDNS_I18N_URL=$(curl -s https://api.github.com/repos/svenshi/luci-app-oxidns/releases/latest | grep "browser_download_url.*luci-i18n-oxidns-zh-cn.*\.apk" | head -n1 | cut -d '"' -f 4)
-    [ -n "$OXIDNS_LUCI_URL" ] && wget "$OXIDNS_LUCI_URL" -P /home/build/immortalwrt/packages/
-    [ -n "$OXIDNS_I18N_URL" ] && wget "$OXIDNS_I18N_URL" -P /home/build/immortalwrt/packages/
-
-    echo "✅ 下载并预置 OxiDNS core 二进制与 WebUI"
-    mkdir -p files/usr/bin files/usr/share/oxidns
-    OXIDNS_CORE_URL=$(curl -s https://api.github.com/repos/svenshi/oxidns/releases/latest | grep "browser_download_url.*aarch64-unknown-linux-musl\.tar\.gz" | head -n1 | cut -d '"' -f 4)
-    if [ -n "$OXIDNS_CORE_URL" ]; then
-        curl -sL "$OXIDNS_CORE_URL" | tar -xz -C /tmp/
-        [ -f /tmp/oxidns ] && mv /tmp/oxidns files/usr/bin/oxidns && chmod +x files/usr/bin/oxidns
-        [ -d /tmp/webui ] && rm -rf files/usr/share/oxidns/webui && mv /tmp/webui files/usr/share/oxidns/webui
-    fi
-fi
-
 
 make image PROFILE=$PROFILE PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE
 

@@ -96,10 +96,11 @@ on:
           - '3G'
           - '4G'
       enable_store:
-        description: "集成 store 商店"
+        description: |
+          集成 store 商店（注意：apk/25.12 路径的第三方集成尚未完成，建议保持关闭）
         required: false
         type: boolean
-        default: true
+        default: false
       include_docker:
         description: |
           是否编译 Docker 插件
@@ -164,11 +165,12 @@ jobs:
           fi
       - name: Check Docker
         run: |
+          # 25.12 的 Docker 组件已由 rockchip/build25.sh 根据 INCLUDE_DOCKER 直接写入 PACKAGES。
+          # 此处不再向 custom-packages.sh 追加（该文件不被 build25.sh 引用，且会触发未完成的第三方路径）。
           if [[ "${{ inputs.include_docker }}" == "yes" ]]; then
-             echo 'CUSTOM_PACKAGES="$CUSTOM_PACKAGES docker"' >> shell/custom-packages.sh
-             echo "✅ 已为Rockchip平台补充 docker 组件"
+             echo "✅ Docker 组件将由 build25.sh 根据 INCLUDE_DOCKER=yes 加入"
           fi
-      
+
 
       - name: Building Rockchip ImmortalWrt 25.12.x
         run: |
