@@ -23,7 +23,12 @@ EOF
 echo "cat pppoe-settings"
 cat /home/build/immortalwrt/files/etc/config/pppoe-settings
 
-if [ -z "$CUSTOM_PACKAGES" ]; then
+NEED_STORE_REPO=0
+if [ -n "$CUSTOM_PACKAGES" ] || echo "$PACKAGES" | grep -qE "luci-app-unishare|webdav2"; then
+  NEED_STORE_REPO=1
+fi
+
+if [ "$NEED_STORE_REPO" -eq 0 ]; then
   echo "⚪️ 未选择 任何第三方软件包"
 else
   # 下载 run 文件仓库
@@ -68,6 +73,18 @@ if [ "$INCLUDE_DOCKER" = "yes" ]; then
 fi
 # 文件管理器
 PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"
+
+# 硬件驱动与无线网络支持 (针对 NanoPi R5C 等设备强化 2.5G 网卡与 MT7921 Wi-Fi 6)
+PACKAGES="$PACKAGES kmod-r8125"
+PACKAGES="$PACKAGES kmod-mt7921-common kmod-mt7921-firmware kmod-mt7921e"
+PACKAGES="$PACKAGES iw iwinfo wpad-openssl"
+PACKAGES="$PACKAGES kmod-btusb mt7921bt-firmware"
+
+# 集成 OxiDNS (https://oxidns.org/openwrt)
+PACKAGES="$PACKAGES luci-app-oxidns luci-i18n-oxidns-zh-cn"
+
+# 统一文件共享 (Samba + WebDAV 二合一，包含 WebDAV2 核心与 Samba4 协议服务)
+PACKAGES="$PACKAGES luci-app-unishare unishare webdav2 luci-i18n-samba4-zh-cn"
 # ======== shell/custom-packages.sh =======
 # 合并imm仓库以外的第三方插件
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
@@ -76,40 +93,23 @@ PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
 
-# 若构建openclash 则添加内核
-if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
-    echo "✅ 已选择 luci-app-openclash，添加 openclash core"
-    mkdir -p files/etc/openclash/core
-    # Download clash_meta
-    META_URL="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz"
-    wget -qO- $META_URL | tar xOvz > files/etc/openclash/core/clash_meta
-    chmod +x files/etc/openclash/core/clash_meta
-    # Download GeoIP and GeoSite
-    wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O files/etc/openclash/GeoIP.dat
-    wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O files/etc/openclash/GeoSite.dat
-    # Download latest openclash Client
-    URL=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest \
-      | grep "browser_download_url.*ipk" \
-      | head -n1 \
-      | cut -d '"' -f 4)
-    echo "OpenClash latest ipk: $URL"
-    wget "$URL" -P /home/build/immortalwrt/packages/
-else
-    echo "⚪️ 未选择 luci-app-openclash"
-fi
+# 若构建 OxiDNS 则下载 luci 插件包并预置内核与 WebUI
+if echo "$PACKAGES" | grep -q "luci-app-oxidns"; then
+    echo "✅ 已选择 luci-app-oxidns，下载 luci-app-oxidns 及其语言包"
+    mkdir -p /home/build/immortalwrt/packages
+    OXIDNS_LUCI_URL=$(curl -s https://api.github.com/repos/svenshi/luci-app-oxidns/releases/latest | grep "browser_download_url.*luci-app-oxidns.*\.ipk" | head -n1 | cut -d '"' -f 4)
+    OXIDNS_I18N_URL=$(curl -s https://api.github.com/repos/svenshi/luci-app-oxidns/releases/latest | grep "browser_download_url.*luci-i18n-oxidns-zh-cn.*\.ipk" | head -n1 | cut -d '"' -f 4)
+    [ -n "$OXIDNS_LUCI_URL" ] && wget "$OXIDNS_LUCI_URL" -P /home/build/immortalwrt/packages/
+    [ -n "$OXIDNS_I18N_URL" ] && wget "$OXIDNS_I18N_URL" -P /home/build/immortalwrt/packages/
 
-if echo "$PACKAGES" | grep -q "luci-app-ssr-plus"; then
-    echo "✅ 已选择 luci-app-ssr-plus，添加 mihomo core"
-    mkdir -p files/usr/bin
-    # Download mihomo
-    MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.24/mihomo-linux-arm64-v1.19.24.gz"
-    mkdir -p files/usr/bin
-    wget -qO- "$MIHOMO_URL" | gzip -dc > files/usr/bin/mihomo
-    chmod +x files/usr/bin/mihomo
-    echo "✅ 已下载 mihomo core"
-    ls -lah files/usr/bin
-else
-    echo "⚪️ 未选择 luci-app-ssr-plus"
+    echo "✅ 下载并预置 OxiDNS core 二进制与 WebUI"
+    mkdir -p files/usr/bin files/usr/share/oxidns
+    OXIDNS_CORE_URL=$(curl -s https://api.github.com/repos/svenshi/oxidns/releases/latest | grep "browser_download_url.*aarch64-unknown-linux-musl\.tar\.gz" | head -n1 | cut -d '"' -f 4)
+    if [ -n "$OXIDNS_CORE_URL" ]; then
+        curl -sL "$OXIDNS_CORE_URL" | tar -xz -C /tmp/
+        [ -f /tmp/oxidns ] && mv /tmp/oxidns files/usr/bin/oxidns && chmod +x files/usr/bin/oxidns
+        [ -d /tmp/webui ] && rm -rf files/usr/share/oxidns/webui && mv /tmp/webui files/usr/share/oxidns/webui
+    fi
 fi
 
 

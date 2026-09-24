@@ -124,6 +124,23 @@ elif [ "$count" -gt 1 ]; then
         echo "PPPoE not enabled." >>$LOGFILE
     fi
 
+    # 固定物理网卡 MAC 地址，防止像 NanoPi R5C 等无板载 EEPROM 的设备开机分配随机 MAC 导致漂移
+    for iface in $ifnames; do
+        if [ -d "/sys/class/net/$iface" ]; then
+            cur_mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null)
+            if [ -n "$cur_mac" ] && [ "$cur_mac" != "00:00:00:00:00:00" ]; then
+                dev_sec=$(uci show network 2>/dev/null | grep "name='$iface'" | cut -d. -f2 | head -n1)
+                if [ -z "$dev_sec" ]; then
+                    uci add network device >/dev/null
+                    dev_sec="@device[-1]"
+                    uci set "network.$dev_sec.name=$iface"
+                fi
+                uci set "network.$dev_sec.macaddr=$cur_mac"
+                echo "Persisted MAC for $iface: $cur_mac" >>$LOGFILE
+            fi
+        fi
+    done
+
     uci commit network
 fi
 
@@ -214,6 +231,42 @@ EOF
 
 else
     echo "未检测到 Docker，跳过防火墙配置。"
+fi
+
+# 检查并配置 Wi-Fi 无线网络 (针对板载 MT7921 等无线网卡自动启用)
+if command -v wifi >/dev/null 2>&1; then
+    # 若 /etc/config/wireless 不存在或为空，主动触发一次探测生成
+    if [ ! -s /etc/config/wireless ]; then
+        wifi config
+    fi
+
+    radios=$(uci show wireless 2>/dev/null | grep "=wifi-device" | cut -d. -f2 | cut -d= -f1)
+    if [ -n "$radios" ]; then
+        echo "Configuring wireless interfaces: $radios" >>$LOGFILE
+        for r in $radios; do
+            uci set "wireless.$r.disabled=0"
+            uci set "wireless.$r.country=CN"
+        done
+
+        # 为第一个无线网络配置默认 AP
+        first_radio=$(echo "$radios" | head -n1)
+        if_sec="default_$first_radio"
+        if ! uci get "wireless.$if_sec" >/dev/null 2>&1; then
+            if_sec=$(uci show wireless 2>/dev/null | grep "=wifi-iface" | cut -d. -f2 | cut -d= -f1 | head -n1)
+        fi
+
+        if [ -n "$if_sec" ]; then
+            uci set "wireless.$if_sec.ssid=ImmortalWrt-WiFi"
+            uci set "wireless.$if_sec.encryption=psk2"
+            uci set "wireless.$if_sec.key=12345678"
+            uci set "wireless.$if_sec.network=lan"
+            echo "Wireless AP enabled: SSID=ImmortalWrt-WiFi" >>$LOGFILE
+        fi
+
+        uci commit wireless
+    else
+        echo "No wireless radio detected during uci-defaults." >>$LOGFILE
+    fi
 fi
 
 exit 0
