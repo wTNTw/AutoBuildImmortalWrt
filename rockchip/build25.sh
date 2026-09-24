@@ -77,6 +77,11 @@ PACKAGES="$PACKAGES luci-app-samba4 luci-i18n-samba4-zh-cn"
 # 详见下方「OxiDNS（第三方，改为文件注入）」段落的说明。不在 PACKAGES 中声明任何 oxidns 包。
 ENABLE_OXIDNS=1
 
+# 集成 Nikki（mihomo 代理，第三方）：同样采用「文件注入」，理由与 OxiDNS 相同。
+# 三个包（luci-app-nikki / nikki / mihomo）从社区源 dl.openwrt.ai 的 opkg 格式 ipk 解包注入，
+# 其余依赖（含内核模块，必须匹配内核版本）走官方源经 apk 正常安装。
+ENABLE_NIKKI=1
+
 # ========== 系统级优化组件 ==========
 # eMMC 寿命与 I/O：fstrim 定期 TRIM；zram-swap 为内存压缩交换，不写闪存
 PACKAGES="$PACKAGES fstrim zram-swap"
@@ -107,6 +112,14 @@ PACKAGES="$PACKAGES usteer luci-app-usteer luci-i18n-usteer-zh-cn dawn luci-app-
 PACKAGES="$PACKAGES luci-app-advanced-reboot luci-i18n-advanced-reboot-zh-cn"
 PACKAGES="$PACKAGES luci-app-commands luci-i18n-commands-zh-cn"
 PACKAGES="$PACKAGES luci-app-cpufreq luci-i18n-cpufreq-zh-cn"
+
+# ========== Nikki 代理的依赖（本体走文件注入，见下方段落） ==========
+# nikki 的 Depends：libc ca-bundle curl yq firewall4 ip-full
+#   kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy mihomo
+# 其中 luci-app-nikki / nikki / mihomo 三个包改为文件注入；
+# 其余依赖都是官方源包，正常经 apk 安装（内核模块必须走 apk 才能匹配内核版本）。
+PACKAGES="$PACKAGES ca-bundle yq ip-full rpcd-mod-ucode"
+PACKAGES="$PACKAGES kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy"
 # ======== shell/custom-packages.sh =======
 # 合并imm仓库以外的第三方插件
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
@@ -201,6 +214,71 @@ if [ "$ENABLE_OXIDNS" = "1" ]; then
     ls -la files/etc/init.d/oxidns files/usr/libexec/rpcd/luci.oxidns 2>/dev/null
     ls -la files/www/luci-static/resources/view/oxidns/ 2>/dev/null | head -n 8
     ls -la files/usr/lib/lua/luci/i18n/oxidns.zh-cn.lmo 2>/dev/null
+fi
+
+# ============ Nikki（mihomo 代理，第三方，改为文件注入）============
+# 为何不能用 apk 装：25.12 是 apk，而 ImageBuilder 无法安装第三方 .apk，
+# 且 nikki 不在 ImmortalWrt 官方源中（仅存在于社区源）。
+# 做法：从社区源 dl.openwrt.ai 取 opkg 格式 ipk，解出 data.tar.gz 铺入 files/。
+# 注意 mihomo 内核：官方包放在 /usr/libexec/mihomo-core，
+# 但 nikki 的 /etc/init.d/nikki 里固定为 PROG="/usr/bin/mihomo"，因此放到 /usr/bin/mihomo。
+if [ "$ENABLE_NIKKI" = "1" ]; then
+    echo "---- Nikki: 从社区源 ipk 提取文件到 files/ ----"
+    NK_FEED="https://dl.openwrt.ai/packages-25.12/aarch64_generic/kiddin9"
+    NK_TMP=/tmp/nikki-pkgs
+    rm -rf "$NK_TMP"; mkdir -p "$NK_TMP"
+
+    if curl -fsSL "$NK_FEED/Packages.gz" | gzip -dc > "$NK_TMP/Packages.txt"; then
+        echo "  已获取社区源索引（$(grep -c '^Package: ' "$NK_TMP/Packages.txt") 个包）"
+    else
+        echo "  警告: 社区源索引获取失败，跳过 Nikki"
+    fi
+
+    pick_fn() { awk -v PK="$1" '$0=="Package: "PK{f=1} f&&/^Filename:/{print $2; exit}' "$NK_TMP/Packages.txt"; }
+
+    # 1) LuCI 界面 + 服务脚本：直接解包铺入 files/
+    for p in luci-app-nikki nikki; do
+        fn=$(pick_fn "$p")
+        if [ -z "$fn" ]; then echo "  警告: 索引中未找到 $p"; continue; fi
+        d="$NK_TMP/$p"; mkdir -p "$d"
+        if curl -fsSL "$NK_FEED/$fn" -o "$d/pkg.ipk" \
+           && tar -xzf "$d/pkg.ipk" -C "$d" 2>/dev/null \
+           && [ -f "$d/data.tar.gz" ] \
+           && tar -xzf "$d/data.tar.gz" -C files/; then
+            echo "  OK $fn 已铺入 files/"
+        else
+            echo "  警告: $fn 处理失败"
+        fi
+    done
+
+    # 2) mihomo 内核：从包内 /usr/libexec/mihomo-core 取出，放到 /usr/bin/mihomo
+    fn=$(pick_fn mihomo)
+    if [ -n "$fn" ]; then
+        d="$NK_TMP/mihomo"; mkdir -p "$d"
+        if curl -fsSL "$NK_FEED/$fn" -o "$d/pkg.ipk" \
+           && tar -xzf "$d/pkg.ipk" -C "$d" 2>/dev/null \
+           && [ -f "$d/data.tar.gz" ] \
+           && tar -xzf "$d/data.tar.gz" -C "$d"; then
+            if [ -f "$d/usr/libexec/mihomo-core" ]; then
+                mkdir -p files/usr/bin
+                cp -f "$d/usr/libexec/mihomo-core" files/usr/bin/mihomo
+                chmod 755 files/usr/bin/mihomo
+                echo "  OK mihomo 内核 -> files/usr/bin/mihomo ($(du -h files/usr/bin/mihomo | cut -f1))"
+            else
+                echo "  警告: mihomo 包内未找到 usr/libexec/mihomo-core"
+            fi
+        else
+            echo "  警告: mihomo 包处理失败"
+        fi
+    fi
+
+    # 清理临时解包目录，避免把 usr/libexec 之类的中间产物带进 files/
+    rm -rf "$NK_TMP"
+
+    echo "---- files/ 中 Nikki 相关文件 ----"
+    ls -la files/usr/bin/mihomo files/etc/init.d/nikki files/etc/config/nikki 2>/dev/null
+    ls -la files/usr/lib/lua/luci/i18n/nikki.zh-cn.lmo 2>/dev/null
+    find files/etc/nikki files/www/luci-static/resources/view/nikki -type f 2>/dev/null | sed 's/^/  /'
 fi
 
 # 构建镜像
