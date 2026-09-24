@@ -253,6 +253,31 @@ if [ "$ENABLE_NIKKI" = "1" ]; then
     echo "---- 预置的 apk 清单 ----"
     ls -la "$NK_DST" 2>/dev/null
 
+    # ---- 去重：同名包只保留最高版本 ----
+    # 上游仓库同时保留历史版本（如 luci-app-nikki-1.25.3 与 1.26.0、nikki-2026.03.10 与 2026.04.08），
+    # 而首启 rc.local 执行 `apk add --allow-untrusted /usr/share/nikki-apk/*.apk`；
+    # 同名多版本一次性安装会因包冲突导致首启安装失败，故此处按“包名”去重、仅保留版本最高者。
+    if ls "$NK_DST"/*.apk >/dev/null 2>&1; then
+        nk_dedup=/tmp/nikki-dedup
+        rm -f "$nk_dedup"/*.apk 2>/dev/null
+        mkdir -p "$nk_dedup"
+        for f in "$NK_DST"/*.apk; do
+            b=$(basename "$f")
+            # 包名 = 去掉从首个“-数字”开始的后缀（版本号总以数字开头）
+            pkg=$(printf '%s' "$b" | sed -E 's/-[0-9].*//')
+            if printf '1.2\n1.10\n' | sort -V >/dev/null 2>&1; then
+                keep=$(ls "$NK_DST"/"${pkg}"-*.apk 2>/dev/null | sort -V | tail -n1)
+            else
+                keep=$(ls "$NK_DST"/"${pkg}"-*.apk 2>/dev/null | sort | tail -n1)
+            fi
+            [ -n "$keep" ] && cp -f "$keep" "$nk_dedup"/
+        done
+        rm -f "$NK_DST"/*.apk
+        cp -f "$nk_dedup"/*.apk "$NK_DST"/ 2>/dev/null
+        echo "---- 去重后预置包（每个包仅保留最高版本）----"
+        ls -la "$NK_DST" 2>/dev/null
+    fi
+
     # 若预置包中不含 mihomo 内核，则从上游补一个二进制到 /usr/bin/mihomo
     # （nikki 的 /etc/init.d/nikki 固定 PROG="/usr/bin/mihomo"）
     if ! ls "$NK_DST"/mihomo*.apk >/dev/null 2>&1; then
