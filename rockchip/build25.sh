@@ -121,6 +121,18 @@ if echo " $PACKAGES " | grep -q " luci-app-store "; then
     # 与 iStore 官方 reinstall 脚本的兜底逻辑一致，这里显式补上兼容层
     PACKAGES="$PACKAGES luci-compat luci-lua-runtime"
 
+    # 【签名信任】iStore 的仓库索引是签名的，而镜像构建器默认开启签名校验
+    # （我们的 imm25.config 中 CONFIG_SIGNATURE_CHECK=y，Makefile 会传 --keys-dir $(TOPDIR)/keys），
+    # 但它不认识 iStore 的密钥，会报 “UNTRUSTED signature” 并直接弃用该仓库。
+    # 官方 is-opkg 的做法就是把公钥装进 /etc/apk/keys/，这里同样装进镜像构建器的 keys 目录。
+    KEYS_DIR="/home/build/immortalwrt/keys"
+    mkdir -p "$KEYS_DIR"
+    if curl -fsSL "https://istore.istoreos.com/repo-apk/istore-apk.pem" -o "$KEYS_DIR/istore.pem"; then
+        echo "✅ 已安装 iStore 公钥: $KEYS_DIR/istore.pem"
+    else
+        echo "⚠️ iStore 公钥下载失败，仓库索引将因签名未受信任而被弃用"
+    fi
+
     REPO_FILE="/home/build/immortalwrt/repositories"
     [ -f "$REPO_FILE" ] || REPO_FILE="repositories"
     ISTORE_APK_INDEX="https://istore.istoreos.com/repo-apk/all/store/packages.adb"
@@ -132,6 +144,8 @@ if echo " $PACKAGES " | grep -q " luci-app-store "; then
     fi
     echo "---- 当前 repositories ----"
     cat "$REPO_FILE" 2>/dev/null
+    echo "---- keys 目录 ----"
+    ls -la "$KEYS_DIR" 2>/dev/null
 fi
 
 # 构建镜像
