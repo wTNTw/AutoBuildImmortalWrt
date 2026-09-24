@@ -24,7 +24,7 @@ echo "cat pppoe-settings"
 cat /home/build/immortalwrt/files/etc/config/pppoe-settings
 
 NEED_STORE_REPO=0
-if [ -n "$CUSTOM_PACKAGES" ] || echo "$PACKAGES" | grep -qE "luci-app-unishare|webdav2"; then
+if [ -n "$CUSTOM_PACKAGES" ]; then
   NEED_STORE_REPO=1
 fi
 
@@ -89,8 +89,8 @@ PACKAGES="$PACKAGES kmod-tcp-bbr"
 # 集成 OxiDNS (https://oxidns.org/openwrt)
 PACKAGES="$PACKAGES luci-app-oxidns luci-i18n-oxidns-zh-cn"
 
-# 统一文件共享 (Samba + WebDAV 二合一，包含 WebDAV2 核心与 Samba4 协议服务)
-PACKAGES="$PACKAGES luci-app-unishare unishare webdav2 luci-i18n-samba4-zh-cn"
+# 文件共享 (Samba4 协议服务，官方源提供；UniShare 已按需求移除)
+PACKAGES="$PACKAGES luci-i18n-samba4-zh-cn"
 
 # ========== 系统级优化组件 ==========
 # eMMC 寿命与 I/O：fstrim 定期 TRIM；zram-swap 为内存压缩交换，不写闪存
