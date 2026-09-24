@@ -1,0 +1,34 @@
+#!/bin/sh
+# 由本项目预置：网卡（重新）出现时施加 RPS/XPS 队列亲和性
+#
+# 为什么需要这个脚本：
+#   OpenWrt 自带的 /etc/hotplug.d/net/40-net-smp-affinity 以及部分网卡驱动
+#   （如 RTL8125 的 kmos-r8125）会在设备热插拔/驱动初始化时重写队列亲和性与 RPS 掩码，
+#   而 /etc/rc.local（boot-tuning.sh）只在开机时执行一次，写下的值会被后续事件覆盖。
+#   hotplug-call 按文件名顺序依次 source 各脚本，本文件以 99- 开头，因此最后执行。
+#
+# 注意：/sbin/hotplug-call 是 `. $script`（source）方式，所以本文件不需要可执行位。
+
+[ "$ACTION" = "add" ] || exit 0
+
+cpu_count=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 4)
+if [ "$cpu_count" -ge 4 ]; then
+    mask="f"
+elif [ "$cpu_count" -ge 2 ]; then
+    mask="3"
+else
+    mask="1"
+fi
+
+# DEVICENAME 由 hotplug-call 导出；也兼容直接手动执行的情况
+iface="${DEVICENAME:-${INTERFACE:-}}"
+if [ -n "$iface" ]; then
+    for rx in /sys/class/net/"$iface"/queues/rx-*/rps_cpus; do
+        [ -f "$rx" ] && echo "$mask" > "$rx" 2>/dev/null
+    done
+    for tx in /sys/class/net/"$iface"/queues/tx-*/xps_cpus; do
+        [ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
+    done
+fi
+
+exit 0

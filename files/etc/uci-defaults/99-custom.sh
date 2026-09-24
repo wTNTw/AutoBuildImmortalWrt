@@ -409,6 +409,10 @@ if command -v wifi >/dev/null 2>&1; then
         for r in $radios; do
             uci set "wireless.$r.disabled=0"
             uci set "wireless.$r.country=CN"
+            # 修复 MT7921 默认只给 3 dBm 的问题：不显式设置发射功率时，
+            # 驱动会以极低功率（实测 3 dBm，约 2mW）起 AP，几乎无法使用。
+            # CN 法规下 5.15-5.35GHz 允许 30dBm，这里取 20dBm 兼顾覆盖与发热。
+            uci set "wireless.$r.txpower='20'"
         done
 
         # 为第一个无线网络配置默认 AP
@@ -432,13 +436,30 @@ if command -v wifi >/dev/null 2>&1; then
     fi
 fi
 
-# 自动配置社区第三方预编译软件包源 (涵盖 kenzok8 / passwall / 各种社区常用插件)
-if [ -f /etc/opkg.conf ]; then
-    # 注释 check_signature，避免第三方无签名源在更新时报错
-    sed -i 's/^option check_signature/# option check_signature/' /etc/opkg.conf
-fi
-
-if [ -d /etc/opkg ]; then
+# 自动配置第三方软件源：按**实际使用的包管理器**选择正确的配置文件与格式
+#   opkg（24.10）: /etc/opkg/customfeeds.conf      -> "src/gz <name> <url>"
+#   apk （25.12）: /etc/apk/repositories.d/customfeeds.list -> 指向 packages.adb 的完整 URL
+#
+# 踩坑记录（2026-09-25 在设备上定位）：
+# 1) 旧版本只判断 [ -d /etc/opkg ]，而 25.12 的镜像里 /etc/opkg 目录仍然存在（但无 opkg 二进制），
+#    导致脚本「成功」地把源写到了 apk 系统永远不会读的 opkg 文件里，
+#    /etc/apk/repositories.d/customfeeds.list 一直是空的。现改为按 apk/opkg 可执行文件判定。
+# 2) dl.openwrt.ai 的 25.12 仓库只有 opkg 格式（Packages.gz），没有 packages.adb，
+#    而 apk 只认 packages.adb 索引，因此该源在 25.12 上**不能**当软件源使用，
+#    此处不再向 apk 列表写入它（写了只会报错）。
+if command -v apk >/dev/null 2>&1 && [ -d /etc/apk ]; then
+    APK_DIR=/etc/apk/repositories.d
+    APK_LIST=$APK_DIR/customfeeds.list
+    mkdir -p "$APK_DIR"
+    # iStore 官方 apk 仓库（自带 ADB 索引；公钥 istore.pem 已随镜像置于 /etc/apk/keys/）
+    ISTORE_APK="https://istore.istoreos.com/repo-apk/all/store/packages.adb"
+    if ! grep -qF "$ISTORE_APK" "$APK_LIST" 2>/dev/null; then
+        printf '# iStore 官方 apk 仓库（由本项目添加，带 ADB 索引）\n%s\n' "$ISTORE_APK" >> "$APK_LIST"
+    fi
+    echo "apk customfeeds written to $APK_LIST" >> $LOGFILE
+elif command -v opkg >/dev/null 2>&1 && [ -d /etc/opkg ]; then
+    # 兼容 24.10（opkg）：保持原有行为
+    [ -f /etc/opkg.conf ] && sed -i 's/^option check_signature/# option check_signature/' /etc/opkg.conf
     CUSTOMFEEDS="/etc/opkg/customfeeds.conf"
     opkg_arch=$(opkg print-architecture 2>/dev/null | awk 'NR>1 {print $2}' | tail -n 1)
     [ -z "$opkg_arch" ] && opkg_arch="aarch64_generic"
@@ -520,6 +541,47 @@ if [ -f "$governor_file" ] && [ -f "$avail_file" ]; then
         done
     fi
 fi
+
+# 4) 关键 sysctl 二次校对
+# 原因：/etc/init.d/sysctl 在 S11 执行，此时部分模块/命名空间尚未就绪，
+# 导致 net.netfilter.* 等项静默失败；这里在开机后期（rc.local，S95done）重试一次，
+# 并把结果写入持久化日志，便于后续核对是否真的生效。
+SYSCTL_LOG=/overlay/log/boot-tuning.log
+{
+    echo "===== $(date) boot-tuning 校对 ====="
+    for kv in \
+        net.ipv4.tcp_congestion_control=bbr \
+        net.netfilter.nf_conntrack_max=131072 \
+        net.netfilter.nf_conntrack_tcp_timeout_established=7200 \
+        net.core.rmem_max=16777216 \
+        net.core.wmem_max=16777216 \
+        net.core.rmem_default=262144 \
+        net.core.wmem_default=262144 \
+        net.core.netdev_max_backlog=16384 \
+        net.core.somaxconn=8192 \
+        net.ipv4.tcp_tw_reuse=1 \
+        net.ipv4.tcp_fin_timeout=25 \
+        net.ipv4.tcp_fastopen=3 \
+        fs.file-max=2097152 \
+        vm.swappiness=10
+    do
+        sysctl -qw "$kv" || echo "  写入失败: $kv"
+    done
+    for k in net.core.rmem_max net.core.netdev_max_backlog net.netfilter.nf_conntrack_max; do
+        echo "  $k = $(sysctl -n $k 2>/dev/null)"
+    done
+} >> "$SYSCTL_LOG" 2>&1
+
+# 5) 再次施加 RPS/XPS：
+# OpenWrt 自带的 /etc/hotplug.d/net/40-net-smp-affinity 与网卡驱动会在设备热插拔时
+# 重写队列亲和性，而 rc.local 只跑一次，所以这里的值可能被后续事件覆盖。
+# 这里再写一次，并额外由 /etc/hotplug.d/net/99-custom-tuning 在每次网卡出现时重施（序号 99 保证最后执行）。
+for rx in /sys/class/net/*/queues/rx-*/rps_cpus; do
+    [ -f "$rx" ] && echo "$mask" > "$rx" 2>/dev/null
+done
+for tx in /sys/class/net/*/queues/tx-*/xps_cpus; do
+    [ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
+done
 
 exit 0
 EOF
