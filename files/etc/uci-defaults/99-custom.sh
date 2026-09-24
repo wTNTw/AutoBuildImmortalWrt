@@ -153,6 +153,9 @@ uci -q set dropbear.@dropbear[0].Interface=''
 # 4. 系统时区与国内高可靠 NTP 时间同步池 (防断电后证书与 DoH 校验失败)
 uci -q set system.@system[0].zonename='Asia/Shanghai'
 uci -q set system.@system[0].timezone='CST-8'
+
+# LuCI 界面语言固定为简体中文（默认是 auto，仅靠浏览器协商，不可靠）
+uci -q set luci.main.lang='zh_cn'
 uci -q delete system.ntp.server
 uci -q add_list system.ntp.server='ntp.aliyun.com'
 uci -q add_list system.ntp.server='ntp.tencent.com'
