@@ -122,11 +122,13 @@ PACKAGES="$PACKAGES iperf3 coremark"
 # ========== 无线增强 (MT7921) ==========
 # 已移除 travelmate / usteer / dawn：无内置射频（或单射频）时无作用对象，
 # 且 dawn 默认 kicking 可能主动踢开客户端、usteer 与 dawn 功能重叠。
+# wifischedule：按时间开关无线，单射频场景下有一定意义，保留；菜单已改挂到「网络」下。
 PACKAGES="$PACKAGES wifischedule luci-app-wifischedule luci-i18n-wifischedule-zh-cn"
 
 # ========== 安全与便捷 ==========
-PACKAGES="$PACKAGES luci-app-advanced-reboot luci-i18n-advanced-reboot-zh-cn"
-PACKAGES="$PACKAGES luci-app-commands luci-i18n-commands-zh-cn"
+# 已移除 advanced-reboot（高级重启：面向双系统/双恢复分区机型的分区切换重启，
+# 本设备为单系统 eMMC 布局，无目标分区可选）与 commands（自定义命令：网页直连 shell，
+# 功能可由 SSH 覆盖，且暴露任意命令执行面）。
 PACKAGES="$PACKAGES luci-app-cpufreq luci-i18n-cpufreq-zh-cn"
 
 # ========== Nikki 代理的依赖（本体走文件注入，见下方段落） ==========
