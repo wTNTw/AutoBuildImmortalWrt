@@ -268,7 +268,8 @@ fi
 # 11. DNS 缓存调优
 # 解析链保持原有逻辑：由 dnsmasq 作为唯一解析器，上游继续使用运营商 / 上级设备
 # 通过 /tmp/resolv.conf.d/resolv.conf.auto 下发的 DNS；OxiDNS / AdGuardHome 均不接入解析链。
-# 注：AdGuardHome 已随固件预装（服务默认不启用），如需接管 DNS 请在 LuCI 中自行配置。
+# 注：AdGuardHome 已随固件预装；其 init 脚本 UCI enabled 默认 0，首启不监听 53
+#     （不与 dnsmasq 冲突），如需接管 DNS 请在 LuCI 中启用并配置重定向。
 if uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1; then
     # 缓存调优：默认 cachesize=150、min_cache_ttl=0，对家庭/办公规模明显偏小
     uci -q set dhcp.@dnsmasq[0].cachesize='10000'

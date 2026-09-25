@@ -106,8 +106,11 @@ PACKAGES="$PACKAGES pbr luci-app-pbr luci-i18n-pbr-zh-cn"
 #   luci-app-adguardhome-26.236.50544~cb5d434.apk  -> luci 源，LuCI 配置界面
 # 注意事项：
 #   1) 上游未提供 luci-i18n-adguardhome-zh-cn（luci 源仅有 -lo 等少数语言包），界面为英文；
-#   2) 服务默认不启用：AdGuardHome 默认监听 53 端口，与 dnsmasq 冲突，
-#      需先在 LuCI 中配置 DNS 端口/重定向等选项再启用，避免首启 DNS 异常。
+#   2) 服务不会自行运行：init 脚本取 UCI 配置 adguardhome.config.enabled（默认 0），
+#      enabled != 1 时 start_service 直接 return，故不会抢先占用 53 端口与 dnsmasq 冲突。
+#      构建期 ImageBuilder 仍会为其创建 rc.d 软链（日志 "Enabling adguardhome"），这只是启用标记。
+#      需要接管 DNS 时，在 LuCI 中启用并配置重定向即可；机制详见
+#      docs/solutions/build/imagebuilder-rootfs-finalize-semantics.md
 PACKAGES="$PACKAGES adguardhome luci-app-adguardhome"
 
 # ========== 监控与运维 ==========
