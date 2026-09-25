@@ -96,6 +96,16 @@ PACKAGES="$PACKAGES sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn"
 PACKAGES="$PACKAGES miniupnpd-nftables luci-app-upnp luci-i18n-upnp-zh-cn"
 PACKAGES="$PACKAGES pbr luci-app-pbr luci-i18n-pbr-zh-cn"
 
+# ========== DNS 广告过滤 (AdGuardHome) ==========
+# 均为官方源包（非第三方注入），已实测存在于 25.12.1 / aarch64_generic 源：
+#   adguardhome-0.107.76-r1.apk                    -> packages 源，核心二进制 /usr/bin/AdGuardHome
+#   luci-app-adguardhome-26.236.50544~cb5d434.apk  -> luci 源，LuCI 配置界面
+# 注意事项：
+#   1) 上游未提供 luci-i18n-adguardhome-zh-cn（luci 源仅有 -lo 等少数语言包），界面为英文；
+#   2) 服务默认不启用：AdGuardHome 默认监听 53 端口，与 dnsmasq 冲突，
+#      需先在 LuCI 中配置 DNS 端口/重定向等选项再启用，避免首启 DNS 异常。
+PACKAGES="$PACKAGES adguardhome luci-app-adguardhome"
+
 # ========== 监控与运维 ==========
 # 监控仅保留 nlbwmon（连接级带宽记账，功能不可替代且开销可控）；
 # 已移除 vnstat2（接口级记账，功能被 nlbwmon 覆盖）与 netdata（秒级全指标采集，资源占用偏高）。
