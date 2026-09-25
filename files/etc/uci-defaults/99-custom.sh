@@ -568,7 +568,7 @@ done
 #   这里每次开机检查一次，没装上就重试（成功后自动跳过），具备自愈能力。
 NIKKI_APK_DIR=/usr/share/nikki-apk
 if [ -d "$NIKKI_APK_DIR" ] && command -v apk >/dev/null 2>&1; then
-    if ! apk list --installed 2>/dev/null | grep -q '^nikki-'; then
+    if ! apk list --installed 2>/dev/null | grep -qE '^nikki-[0-9]'; then
         echo "===== $(date) 安装预置 apk =====" >> "$SYSCTL_LOG"
         apk add --allow-untrusted --no-network "$NIKKI_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1 \
             || apk add --allow-untrusted "$NIKKI_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1
@@ -576,7 +576,10 @@ if [ -d "$NIKKI_APK_DIR" ] && command -v apk >/dev/null 2>&1; then
         for p in /usr/libexec/mihomo /usr/libexec/mihomo-core; do
             [ -x "$p" ] && [ ! -e /usr/bin/mihomo ] && ln -sf "$p" /usr/bin/mihomo
         done
-        echo "  结果: $(apk list --installed 2>/dev/null | grep -c '^nikki-' ) 个 nikki 相关包已安装" >> "$SYSCTL_LOG"
+        # 计数修正：三个包的包名分别是 nikki / luci-app-nikki / luci-i18n-nikki-zh-cn，
+        # 原先的 '^nikki-' 只能匹配核心包（其行首为 nikki-<版本>），故恒报 1 个。
+        nk_cnt=$(apk list --installed 2>/dev/null | grep -cE '^(nikki|luci-app-nikki|luci-i18n-nikki-zh-cn)-[0-9]')
+        echo "  结果: $nk_cnt/3 个 nikki 相关包已安装（nikki / luci-app-nikki / luci-i18n-nikki-zh-cn）" >> "$SYSCTL_LOG"
     fi
 fi
 
