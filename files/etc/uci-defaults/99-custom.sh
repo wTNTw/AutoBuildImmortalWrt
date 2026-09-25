@@ -245,25 +245,17 @@ uci -q set system.@system[0].zram_size_mb='1024'
 uci -q set system.@system[0].zram_comp_algo='lzo'
 uci commit system
 
-# 9. 监控数据持久化：nlbwmon 默认落在 /var （tmpfs），重启即丢，改到 /overlay
-mkdir -p /overlay/nlbwmon 2>/dev/null
-if [ -f /etc/config/nlbwmon ]; then
-    uci -q set nlbwmon.@nlbwmon[0].database_directory='/overlay/nlbwmon'
-    uci -q set nlbwmon.@nlbwmon[0].commit_interval='10m'
-    uci commit nlbwmon
-fi
-
-# 10. 服务开机启动策略
+# 9. 服务开机启动策略
 # 直接可用的监控/优化服务：启用
-for svc in irqbalance zram nlbwmon miniupnpd; do
+for svc in irqbalance zram miniupnpd; do
     if [ -x "/etc/init.d/$svc" ]; then
         "/etc/init.d/$svc" enable 2>/dev/null
     fi
 done
-# 注：mwan3 / usteer / dawn / vnstat / netdata 已从软件包清单移除，
+# 注：mwan3 / usteer / dawn / vnstat / netdata / nlbwmon 已从软件包清单移除，
 # 故不再需要「装了但默认禁用」的历史处理逻辑。
 
-# 11. eMMC 定期 TRIM：每周日凌晨 4 点对全部支持 discard 的文件系统执行 fstrim
+# 10. eMMC 定期 TRIM：每周日凌晨 4 点对全部支持 discard 的文件系统执行 fstrim
 if [ -x /usr/sbin/fstrim ]; then
     CRON=/etc/crontabs/root
     [ -f "$CRON" ] || touch "$CRON"
@@ -273,9 +265,10 @@ if [ -x /usr/sbin/fstrim ]; then
     /etc/init.d/cron enable 2>/dev/null
 fi
 
-# 12. DNS 缓存调优
+# 11. DNS 缓存调优
 # 解析链保持原有逻辑：由 dnsmasq 作为唯一解析器，上游继续使用运营商 / 上级设备
-# 通过 /tmp/resolv.conf.d/resolv.conf.auto 下发的 DNS，不接入 oxidns / AdGuardHome。
+# 通过 /tmp/resolv.conf.d/resolv.conf.auto 下发的 DNS；OxiDNS / AdGuardHome 均不接入解析链。
+# 注：AdGuardHome 已随固件预装（服务默认不启用），如需接管 DNS 请在 LuCI 中自行配置。
 if uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1; then
     # 缓存调优：默认 cachesize=150、min_cache_ttl=0，对家庭/办公规模明显偏小
     uci -q set dhcp.@dnsmasq[0].cachesize='10000'

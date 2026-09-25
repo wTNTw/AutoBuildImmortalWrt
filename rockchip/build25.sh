@@ -86,6 +86,8 @@ ENABLE_NIKKI=1
 # eMMC 寿命与 I/O：fstrim 定期 TRIM；zram-swap 为内存压缩交换，不写闪存
 PACKAGES="$PACKAGES fstrim zram-swap"
 # 中断分发与多队列：将网卡硬件中断分散到多个 CPU 核心
+# 注：其 LuCI 菜单项默认挂在「服务」下，已由 files/usr/share/luci/menu.d/luci-app-irqbalance.json
+#     改挂到「网络」菜单（覆盖同名菜单文件，不会产生重复入口；ACL 按应用名授权，无需改动）
 PACKAGES="$PACKAGES irqbalance luci-app-irqbalance luci-i18n-irqbalance-zh-cn"
 
 # ========== 网络 (双 2.5G) ==========
@@ -93,6 +95,8 @@ PACKAGES="$PACKAGES irqbalance luci-app-irqbalance luci-i18n-irqbalance-zh-cn"
 PACKAGES="$PACKAGES iptables-nft ip6tables-nft"
 # 注：已移除 mwan3 / luci-app-mwan3（本机为单 WAN 场景，多线负载均衡无对象）
 PACKAGES="$PACKAGES sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn"
+# 注：upnp 的 LuCI 菜单项默认挂在「服务」下，已由 files/usr/share/luci/menu.d/luci-app-upnp.json
+#     改挂到「网络」菜单（覆盖同名菜单文件；title 保持原串不变，以便 luci-i18n-upnp-zh-cn 仍能汉化）
 PACKAGES="$PACKAGES miniupnpd-nftables luci-app-upnp luci-i18n-upnp-zh-cn"
 PACKAGES="$PACKAGES pbr luci-app-pbr luci-i18n-pbr-zh-cn"
 
@@ -107,9 +111,8 @@ PACKAGES="$PACKAGES pbr luci-app-pbr luci-i18n-pbr-zh-cn"
 PACKAGES="$PACKAGES adguardhome luci-app-adguardhome"
 
 # ========== 监控与运维 ==========
-# 监控仅保留 nlbwmon（连接级带宽记账，功能不可替代且开销可控）；
-# 已移除 vnstat2（接口级记账，功能被 nlbwmon 覆盖）与 netdata（秒级全指标采集，资源占用偏高）。
-PACKAGES="$PACKAGES nlbwmon luci-app-nlbwmon luci-i18n-nlbwmon-zh-cn"
+# 带宽监控类插件已全部移除：nlbwmon（连接级记账）、vnstat2（接口级记账）、
+# netdata（秒级全指标采集，资源占用偏高）；本地仅保留按需使用的吞吐测试工具。
 PACKAGES="$PACKAGES luci-app-cpulimit luci-i18n-cpulimit-zh-cn"
 PACKAGES="$PACKAGES iperf3 coremark"
 
