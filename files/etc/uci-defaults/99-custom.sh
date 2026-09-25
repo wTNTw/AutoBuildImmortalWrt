@@ -245,43 +245,23 @@ uci -q set system.@system[0].zram_size_mb='1024'
 uci -q set system.@system[0].zram_comp_algo='lzo'
 uci commit system
 
-# 9. 监控数据持久化：nlbwmon / vnstat 默认落在 /var （tmpfs），重启即丢，改到 /overlay
-mkdir -p /overlay/nlbwmon /overlay/vnstat 2>/dev/null
+# 9. 监控数据持久化：nlbwmon 默认落在 /var （tmpfs），重启即丢，改到 /overlay
+mkdir -p /overlay/nlbwmon 2>/dev/null
 if [ -f /etc/config/nlbwmon ]; then
     uci -q set nlbwmon.@nlbwmon[0].database_directory='/overlay/nlbwmon'
     uci -q set nlbwmon.@nlbwmon[0].commit_interval='10m'
     uci commit nlbwmon
 fi
-if [ -f /etc/vnstat.conf ]; then
-    # vnstat 默认数据库目录可能被注释掉，这里同时处理注释与未注释两种形式
-    sed -i 's#^[[:space:]]*;\?[[:space:]]*DatabaseDir.*#DatabaseDir "/overlay/vnstat"#' /etc/vnstat.conf
-    grep -q '^DatabaseDir' /etc/vnstat.conf || echo 'DatabaseDir "/overlay/vnstat"' >> /etc/vnstat.conf
-fi
-if [ -f /etc/config/vnstat ]; then
-    uci -q delete vnstat.@vnstat[0].interface
-    for i in $wan_ifname $lan_ifnames; do
-        dev=$(echo "$i" | awk '{print $1}')
-        [ -n "$dev" ] && [ -d "/sys/class/net/$dev" ] && uci -q add_list "vnstat.@vnstat[0].interface=$dev"
-    done
-    uci commit vnstat
-fi
 
 # 10. 服务开机启动策略
 # 直接可用的监控/优化服务：启用
-for svc in irqbalance zram nlbwmon vnstat netdata miniupnpd; do
+for svc in irqbalance zram nlbwmon miniupnpd; do
     if [ -x "/etc/init.d/$svc" ]; then
         "/etc/init.d/$svc" enable 2>/dev/null
     fi
 done
-
-# 需要用户先完成配置的服务：保持禁用，避免单网卡/单线环境下产生意外行为
-# - mwan3  : 需先添加并启用第二条 WAN（wanb），否则会接管默认路由
-# - usteer / dawn : 单射频环境下无漫游对象，且 dawn 默认启用 kicking 可能主动踢开客户端
-for svc in mwan3 usteer dawn; do
-    if [ -x "/etc/init.d/$svc" ]; then
-        "/etc/init.d/$svc" disable 2>/dev/null
-    fi
-done
+# 注：mwan3 / usteer / dawn / vnstat / netdata 已从软件包清单移除，
+# 故不再需要「装了但默认禁用」的历史处理逻辑。
 
 # 11. eMMC 定期 TRIM：每周日凌晨 4 点对全部支持 discard 的文件系统执行 fstrim
 if [ -x /usr/sbin/fstrim ]; then

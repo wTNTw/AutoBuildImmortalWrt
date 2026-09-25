@@ -88,25 +88,25 @@ PACKAGES="$PACKAGES fstrim zram-swap"
 # 中断分发与多队列：将网卡硬件中断分散到多个 CPU 核心
 PACKAGES="$PACKAGES irqbalance luci-app-irqbalance luci-i18n-irqbalance-zh-cn"
 
-# ========== 网络与多线 (双 2.5G) ==========
-# iptables-nft / ip6tables-nft：为 mwan3、sqm-scripts 提供 iptables 虚拟依赖的确定性解析
+# ========== 网络 (双 2.5G) ==========
+# iptables-nft / ip6tables-nft：为 sqm-scripts 提供 iptables 虚拟依赖的确定性解析
 PACKAGES="$PACKAGES iptables-nft ip6tables-nft"
-PACKAGES="$PACKAGES mwan3 luci-app-mwan3 luci-i18n-mwan3-zh-cn"
+# 注：已移除 mwan3 / luci-app-mwan3（本机为单 WAN 场景，多线负载均衡无对象）
 PACKAGES="$PACKAGES sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn"
 PACKAGES="$PACKAGES miniupnpd-nftables luci-app-upnp luci-i18n-upnp-zh-cn"
 PACKAGES="$PACKAGES pbr luci-app-pbr luci-i18n-pbr-zh-cn"
 
 # ========== 监控与运维 ==========
+# 监控仅保留 nlbwmon（连接级带宽记账，功能不可替代且开销可控）；
+# 已移除 vnstat2（接口级记账，功能被 nlbwmon 覆盖）与 netdata（秒级全指标采集，资源占用偏高）。
 PACKAGES="$PACKAGES nlbwmon luci-app-nlbwmon luci-i18n-nlbwmon-zh-cn"
-PACKAGES="$PACKAGES vnstat2 luci-app-vnstat2 luci-i18n-vnstat2-zh-cn"
-PACKAGES="$PACKAGES netdata luci-app-netdata luci-i18n-netdata-zh-cn"
 PACKAGES="$PACKAGES luci-app-cpulimit luci-i18n-cpulimit-zh-cn"
 PACKAGES="$PACKAGES iperf3 coremark"
 
 # ========== 无线增强 (MT7921) ==========
-PACKAGES="$PACKAGES travelmate luci-app-travelmate luci-i18n-travelmate-zh-cn"
+# 已移除 travelmate / usteer / dawn：无内置射频（或单射频）时无作用对象，
+# 且 dawn 默认 kicking 可能主动踢开客户端、usteer 与 dawn 功能重叠。
 PACKAGES="$PACKAGES wifischedule luci-app-wifischedule luci-i18n-wifischedule-zh-cn"
-PACKAGES="$PACKAGES usteer luci-app-usteer luci-i18n-usteer-zh-cn dawn luci-app-dawn luci-i18n-dawn-zh-cn"
 
 # ========== 安全与便捷 ==========
 PACKAGES="$PACKAGES luci-app-advanced-reboot luci-i18n-advanced-reboot-zh-cn"
