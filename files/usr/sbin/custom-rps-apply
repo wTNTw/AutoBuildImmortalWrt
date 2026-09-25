@@ -1,0 +1,50 @@
+#!/bin/sh
+# ============================================================================
+# custom-rps-apply —— 统一计算并施加 RPS/XPS 队列掩码（本项目预置）
+# ----------------------------------------------------------------------------
+# 为什么要单独成文件：RPS/XPS 的施加点有多处（首启内联、boot-tuning、网卡热插拔、
+# 接口 up、延迟补施），掩码算法必须一致，否则会出现「同一台机器在不同时机被写入不同值」。
+#
+# 用法：
+#   sh /usr/sbin/custom-rps-apply            # 施加到全部网卡
+#   sh /usr/sbin/custom-rps-apply eth0       # 只施加到指定网卡
+#
+# 为什么用 `sh <文件>` 调用、而不是直接执行：files/ 里的脚本在镜像中不保证保留可执行位
+# （现有 /etc/hotplug.d 下的脚本也是 644），用 sh 显式解释可免去这个依赖。
+#
+# 掩码规则：4 核及以上 -> f（全部核心）；2 核 -> 3；单核 -> 1。
+# ============================================================================
+
+mask_for_cpu_count() {
+	cpus=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 4)
+	if [ "$cpus" -ge 4 ]; then
+		echo f
+	elif [ "$cpus" -ge 2 ]; then
+		echo 3
+	else
+		echo 1
+	fi
+}
+
+apply_to() {
+	iface="$1"
+	[ -d "/sys/class/net/$iface/queues" ] || return 0
+	mask=$(mask_for_cpu_count)
+	for rx in /sys/class/net/"$iface"/queues/rx-*/rps_cpus; do
+		[ -f "$rx" ] && echo "$mask" > "$rx" 2>/dev/null
+	done
+	for tx in /sys/class/net/"$iface"/queues/tx-*/xps_cpus; do
+		[ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
+	done
+	return 0
+}
+
+if [ -n "$1" ]; then
+	apply_to "$1"
+else
+	for d in /sys/class/net/*; do
+		apply_to "$(basename "$d")"
+	done
+fi
+
+exit 0

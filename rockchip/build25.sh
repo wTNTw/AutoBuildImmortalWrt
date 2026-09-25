@@ -77,9 +77,9 @@ PACKAGES="$PACKAGES luci-app-samba4 luci-i18n-samba4-zh-cn"
 # 详见下方「OxiDNS（第三方，改为文件注入）」段落的说明。不在 PACKAGES 中声明任何 oxidns 包。
 ENABLE_OXIDNS=1
 
-# 集成 Nikki（mihomo 代理，第三方）：同样采用「文件注入」，理由与 OxiDNS 相同。
-# 三个包（luci-app-nikki / nikki / mihomo）从社区源 dl.openwrt.ai 的 opkg 格式 ipk 解包注入，
-# 其余依赖（含内核模块，必须匹配内核版本）走官方源经 apk 正常安装。
+# 集成 Nikki（mihomo 代理，第三方）：交付方式是「预置 .apk + 首次开机 apk 安装」，不是文件注入。
+# mihomo 核心随 nikki 包提供（/usr/libexec/nikki），不需要单独注入二进制。
+# 完整理由、包来源与首启安装逻辑见下方「Nikki（mihomo 代理，第三方）」段落。
 ENABLE_NIKKI=1
 
 # ========== 系统级优化组件 ==========
@@ -136,11 +136,13 @@ PACKAGES="$PACKAGES wifischedule luci-app-wifischedule luci-i18n-wifischedule-zh
 # 功能可由 SSH 覆盖，且暴露任意命令执行面）。
 PACKAGES="$PACKAGES luci-app-cpufreq luci-i18n-cpufreq-zh-cn"
 
-# ========== Nikki 代理的依赖（本体走文件注入，见下方段落） ==========
+# ========== Nikki 代理的依赖（本体走「预置 apk + 首启安装」，见下方段落） ==========
 # nikki 的 Depends：libc ca-bundle curl yq firewall4 ip-full
 #   kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy mihomo
-# 其中 luci-app-nikki / nikki / mihomo 三个包改为文件注入；
-# 其余依赖都是官方源包，正常经 apk 安装（内核模块必须走 apk 才能匹配内核版本）。
+# 这里只装**官方源**能提供的依赖；luci-app-nikki / nikki 由首启脚本用预置 .apk 安装。
+# 注意：mihomo 核心**不是**独立包名，它打包在 nikki 包内部（安装后 /usr/libexec/nikki，
+# 并自动注册 /usr/bin/mihomo alternative），所以不需要在 PACKAGES 里单列，也不必注入二进制。
+# 内核模块依赖必须留在 PACKAGES 里经 apk 安装，才能与内核版本严格匹配。
 PACKAGES="$PACKAGES ca-bundle yq ip-full rpcd-mod-ucode"
 PACKAGES="$PACKAGES kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy"
 # ======== shell/custom-packages.sh =======
@@ -309,22 +311,20 @@ if [ "$ENABLE_NIKKI" = "1" ]; then
         ls -la "$NK_DST" 2>/dev/null
     fi
 
-    # 若预置包中不含 mihomo 内核，则从上游补一个二进制到 /usr/bin/mihomo
-    # （nikki 的 /etc/init.d/nikki 固定 PROG="/usr/bin/mihomo"）
-    if ! ls "$NK_DST"/mihomo*.apk >/dev/null 2>&1; then
-        echo "  预置包中无 mihomo，改为从上游补内核二进制"
-        mkdir -p files/usr/bin
-        MH_URL=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep "browser_download_url.*linux-arm64.*\.gz" | head -n1 | cut -d '"' -f 4)
-        if [ -n "$MH_URL" ]; then
-            if wget -qO- "$MH_URL" | gzip -dc > files/usr/bin/mihomo; then
-                chmod 755 files/usr/bin/mihomo
-                echo "  OK mihomo 内核 -> files/usr/bin/mihomo ($(du -h files/usr/bin/mihomo | cut -f1))"
-            else
-                echo "  警告: mihomo 内核下载失败"
-            fi
-        else
-            echo "  警告: 未解析到 mihomo 下载地址"
-        fi
+    # ---- 不再向上游补 mihomo 二进制（2026-09-25 修正）----
+    # 曾经的做法：若预置包里没有 mihomo*.apk，就从 MetaCubeX/mihomo 下载 linux-arm64 二进制
+    # 放进 files/usr/bin/mihomo。实测证明这个判据是错的，而且代价很大：
+    #   * mihomo 核心**打包在 nikki 包内部**，安装后位于 /usr/libexec/nikki；
+    #     该包的 post-install 会注册 alternative：/usr/bin/mihomo -> /usr/libexec/nikki；
+    #   * 于是注入的那份在首启安装后立刻被 alternative 覆盖，从头到尾没被使用过。
+    #     真机证据（r37978）：/rom/usr/bin/mihomo 与 /usr/libexec/nikki 字节数完全相同
+    #     （均 57,278,590），Release 体积因此多出约 30MB。
+    # 现改为只做存在性检查并告警：内核由 nikki 包自带，不需要我们兜底。
+    if ls "$NK_DST"/nikki-*.apk >/dev/null 2>&1; then
+        echo "  OK 预置包已含 nikki-*.apk（内含 mihomo 核心 + /usr/bin/mihomo alternative，无需另补二进制）"
+    else
+        echo "  警告: 预置包中没有 nikki-*.apk —— mihomo 核心随该包提供，缺失会导致"
+        echo "        首启装完后 /usr/bin/mihomo 不可用，请检查上游仓库结构是否变化。"
     fi
 fi
 

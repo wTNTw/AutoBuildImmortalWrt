@@ -1,0 +1,23 @@
+#!/bin/sh
+# 由本项目预置：接口 up 时重新施加 RPS/XPS。
+#
+# 为什么还需要这个（与 /etc/hotplug.d/net/99-custom-tuning 的区别）：
+#   net 事件只在设备出现（add）时触发一次；而网卡驱动的队列初始化 / 链路起来 / WAN 侧
+#   DHCP 完成，都可能发生在更晚的时间点，那时 RPS 仍可能被改写。iface 事件覆盖这一场景。
+#
+# 环境变量：iface 事件导出 INTERFACE（逻辑接口名，如 lan/wan）与 DEVICE（物理设备名，
+# 如 eth0）；施加 RPS 需要物理设备名，因此用 DEVICE。
+#
+# 同样由 hotplug-call source 执行，故不需要可执行位。
+
+case "$ACTION" in
+	ifup|ifupdate) ;;
+	*) exit 0 ;;
+esac
+
+iface="${DEVICE:-}"
+[ -n "$iface" ] || exit 0
+
+sh /usr/sbin/custom-rps-apply "$iface"
+
+exit 0

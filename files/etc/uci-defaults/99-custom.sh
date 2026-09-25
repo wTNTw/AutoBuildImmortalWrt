@@ -464,25 +464,9 @@ EOF
     echo "Community customfeeds configured for architecture: $opkg_arch" >> $LOGFILE
 fi
 
-# 优化软中断多核负载均衡 (RPS/XPS)，分摊双 2.5G 网卡与无线数据包至所有 CPU 核心
-cpu_count=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 4)
-if [ "$cpu_count" -ge 4 ]; then
-    mask="f"
-elif [ "$cpu_count" -ge 2 ]; then
-    mask="3"
-else
-    mask="1"
-fi
-
-for iface in /sys/class/net/*; do
-    [ -d "$iface/queues" ] || continue
-    for rx in "$iface"/queues/rx-*; do
-        [ -f "$rx/rps_cpus" ] && echo "$mask" > "$rx/rps_cpus" 2>/dev/null
-    done
-    for tx in "$iface"/queues/tx-*; do
-        [ -f "$tx/xps_cpus" ] && echo "$mask" > "$tx/xps_cpus" 2>/dev/null
-    done
-done
+# 优化软中断多核负载均衡 (RPS/XPS)，分摊双 2.5G 网卡与无线数据包至所有 CPU 核心。
+# 掩码计算与写入统一收在 /usr/sbin/custom-rps-apply，避免多处重复实现导致不一致。
+sh /usr/sbin/custom-rps-apply 2>/dev/null
 
 # 将需要在每次开机重新施加的内核/挂载调优固化到独立脚本，并由 /etc/rc.local 调用
 cat << 'EOF' > /etc/boot-tuning.sh
@@ -490,20 +474,7 @@ cat << 'EOF' > /etc/boot-tuning.sh
 # 自动生成：开机内核与 I/O 调优
 
 # 1) RPS/XPS：将网卡收发包软中断分摊到所有 CPU 核心
-cpu_count=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 4)
-if [ "$cpu_count" -ge 4 ]; then
-    mask="f"
-elif [ "$cpu_count" -ge 2 ]; then
-    mask="3"
-else
-    mask="1"
-fi
-for rx in /sys/class/net/*/queues/rx-*/rps_cpus; do
-    [ -f "$rx" ] && echo "$mask" > "$rx" 2>/dev/null
-done
-for tx in /sys/class/net/*/queues/tx-*/xps_cpus; do
-    [ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
-done
+sh /usr/sbin/custom-rps-apply 2>/dev/null
 
 # 2) 根文件系统以 noatime 重新挂载，减少 eMMC 上无意义的访问时间写入
 if ! awk '$2 == "/" { exit !(index($4, "noatime") > 0) }' /proc/mounts 2>/dev/null; then
@@ -551,16 +522,27 @@ SYSCTL_LOG=/overlay/log/boot-tuning.log
     done
 } >> "$SYSCTL_LOG" 2>&1
 
-# 5) 再次施加 RPS/XPS：
-# OpenWrt 自带的 /etc/hotplug.d/net/40-net-smp-affinity 与网卡驱动会在设备热插拔时
-# 重写队列亲和性，而 rc.local 只跑一次，所以这里的值可能被后续事件覆盖。
-# 这里再写一次，并额外由 /etc/hotplug.d/net/99-custom-tuning 在每次网卡出现时重施（序号 99 保证最后执行）。
-for rx in /sys/class/net/*/queues/rx-*/rps_cpus; do
-    [ -f "$rx" ] && echo "$mask" > "$rx" 2>/dev/null
-done
-for tx in /sys/class/net/*/queues/tx-*/xps_cpus; do
-    [ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
-done
+# 5) RPS/XPS：立即施加 + 开机后延迟补施（真机实测结论，2026-09-25）
+# 现象：开机流程结束后 RPS 会被改回 1/4，而 XPS 保持 f；全盘只有本项目脚本写 rps_cpus，
+#       且手动写 f 后 90 秒内不被回滚 —— 说明改写发生在开机期间的某个时刻，改写者不在
+#       用户态脚本中（irqbalance 无任何 rps 相关代码；40-net-smp-affinity 只写 IRQ 亲和，
+#       且因 RTL8125 多队列 IRQ 名为 eth0-0…eth0-31 而在本机整体失效）。
+# 对策：不追究单一触发点，改为「立即写一次 + 开机后 20s / 60s 再各补一次」，覆盖
+#       S95done 之后才发生的改写；并把补施结果写进日志，刷机后可直接核对是否生效。
+#       另有 /etc/hotplug.d/{net,iface}/99-custom-tuning 在网卡出现 / 接口 up 时重施。
+sh /usr/sbin/custom-rps-apply 2>/dev/null
+(
+    sleep 20
+    sh /usr/sbin/custom-rps-apply 2>/dev/null
+    sleep 40
+    sh /usr/sbin/custom-rps-apply 2>/dev/null
+    {
+        echo "===== $(date) RPS/XPS 延迟补施结果（期望 eth* 的 rps_cpus 与 xps_cpus 都是 f）====="
+        for f in /sys/class/net/eth*/queues/rx-*/rps_cpus /sys/class/net/eth*/queues/tx-*/xps_cpus; do
+            [ -f "$f" ] && echo "  $f = $(cat "$f")"
+        done
+    } >> "$SYSCTL_LOG" 2>&1
+) >/dev/null 2>&1 &
 
 # 6) 安装预置的第三方 apk（Nikki / mihomo）
 # 为何放在 rc.local 而不是 uci-defaults：
@@ -572,8 +554,11 @@ if [ -d "$NIKKI_APK_DIR" ] && command -v apk >/dev/null 2>&1; then
         echo "===== $(date) 安装预置 apk =====" >> "$SYSCTL_LOG"
         apk add --allow-untrusted --no-network "$NIKKI_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1 \
             || apk add --allow-untrusted "$NIKKI_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1
-        # nikki 的 /etc/init.d/nikki 固定用 /usr/bin/mihomo，而部分包的二进制放在 /usr/libexec/
-        for p in /usr/libexec/mihomo /usr/libexec/mihomo-core; do
+        # nikki 的 /etc/init.d/nikki 固定用 /usr/bin/mihomo。
+        # wukongdaily 打包的 nikki 包自带核心于 /usr/libexec/nikki，其 post-install 会自动
+        # 注册 alternative（/usr/bin/mihomo -> /usr/libexec/nikki）；这里再兜一层：万一
+        # alternative 未生效（例如 /usr/bin/mihomo 已被其它东西占用），就手工补软链。
+        for p in /usr/libexec/nikki /usr/libexec/mihomo /usr/libexec/mihomo-core; do
             [ -x "$p" ] && [ ! -e /usr/bin/mihomo ] && ln -sf "$p" /usr/bin/mihomo
         done
         # 计数修正：三个包的包名分别是 nikki / luci-app-nikki / luci-i18n-nikki-zh-cn，

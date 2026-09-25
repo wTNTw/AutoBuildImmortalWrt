@@ -1,34 +1,23 @@
 #!/bin/sh
-# 由本项目预置：网卡（重新）出现时施加 RPS/XPS 队列亲和性
+# 由本项目预置：网卡（重新）出现时施加 RPS/XPS 队列亲和性。
 #
-# 为什么需要这个脚本：
-#   OpenWrt 自带的 /etc/hotplug.d/net/40-net-smp-affinity 以及部分网卡驱动
-#   （如 RTL8125 的 kmos-r8125）会在设备热插拔/驱动初始化时重写队列亲和性与 RPS 掩码，
-#   而 /etc/rc.local（boot-tuning.sh）只在开机时执行一次，写下的值会被后续事件覆盖。
-#   hotplug-call 按文件名顺序依次 source 各脚本，本文件以 99- 开头，因此最后执行。
+# 背景（2026-09-25 真机实测结论）：
+#   * 本机 RPS 在开机流程结束后会被改回 1/4，而 XPS 保持 f；全盘只有本项目脚本写
+#     rps_cpus，且手动写入 f 后 90 秒内不被回滚 —— 说明改写发生在开机期间的某个时刻，
+#     改写者不在用户态脚本里（irqbalance 无 RPS 相关代码；40-net-smp-affinity 只写
+#     /proc/irq/*/smp_affinity，且因 RTL8125 多队列 IRQ 名为 eth0-0…eth0-31 而在本机失效）。
+#   * 因此策略是「多个时机各写一次、并晚于改写发生」，而不是只在开机时写一次。
 #
-# 注意：/sbin/hotplug-call 是 `. $script`（source）方式，所以本文件不需要可执行位。
+# 触发点之一：net 事件（ACTION=add）。本文件以 99- 开头，由 hotplug-call 按文件名顺序
+# source，因此最后执行。注意 hotplug-call 是 `. $script`（source）方式，本文件不需要
+# 可执行位。
 
 [ "$ACTION" = "add" ] || exit 0
 
-cpu_count=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 4)
-if [ "$cpu_count" -ge 4 ]; then
-    mask="f"
-elif [ "$cpu_count" -ge 2 ]; then
-    mask="3"
-else
-    mask="1"
-fi
-
 # DEVICENAME 由 hotplug-call 导出；也兼容直接手动执行的情况
 iface="${DEVICENAME:-${INTERFACE:-}}"
-if [ -n "$iface" ]; then
-    for rx in /sys/class/net/"$iface"/queues/rx-*/rps_cpus; do
-        [ -f "$rx" ] && echo "$mask" > "$rx" 2>/dev/null
-    done
-    for tx in /sys/class/net/"$iface"/queues/tx-*/xps_cpus; do
-        [ -f "$tx" ] && echo "$mask" > "$tx" 2>/dev/null
-    done
-fi
+[ -n "$iface" ] || exit 0
+
+sh /usr/sbin/custom-rps-apply "$iface"
 
 exit 0
