@@ -53,6 +53,8 @@ prepare_rootfs:    $(call prepare_rootfs,$(TARGET_DIR),$(USER_FILES),...)   # �
 - 这类覆盖是「静态副本」，上游若**改动同名菜单文件的字段**（如新增 `depends`）或**重命名文件**，
   我们的副本会滞后（后者还会导致新旧入口并存）。升级 LuCI 版本后应重新比对上游 menu.d。
 - 刷机后自查：`ls /usr/share/luci/menu.d/` 应只见 `admin/network/*` 路径的定义。
+  ✅ **已实机确认（2026-09-25，r37978 / NanoPi R5C）**：两个 JSON 均为 `admin/network/*`，
+  `grep -rl 'admin/services/\(upnp\|irqbalance\)'` 零命中；LuCI「网络」菜单下目视正常显示。
 
 ---
 
