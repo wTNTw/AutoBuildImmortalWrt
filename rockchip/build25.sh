@@ -237,15 +237,23 @@ if [ "$ENABLE_NIKKI" = "1" ]; then
     rm -rf "$NK_SRC"
 
     if git clone --depth=1 https://github.com/wukongdaily/apk.git "$NK_SRC" >/dev/null 2>&1; then
+        # 机型 apk 架构为 aarch64_generic，故只取上游 run/arm64/（generic 构建）；
+        # run/arm64-a53/ 的包标记为 aarch64_cortex-a53，架构不匹配会被 apk 直接判为
+        # uninstallable，导致首启安装失败（实测 2026-09-25，ImmortalWrt 25.12.1/rockchip）。
         # 1) 本来就是 .apk 的
-        find "$NK_SRC" -path '*nikki*' -name '*.apk' -exec cp -f {} "$NK_DST"/ \; 2>/dev/null
+        find "$NK_SRC" -path '*nikki*' -path '*/arm64/*' -name '*.apk' -exec cp -f {} "$NK_DST"/ \; 2>/dev/null
         # 2) 打包在 makeself .run 里的
-        for r in $(find "$NK_SRC" -path '*nikki*' -name '*.run' 2>/dev/null); do
+        for r in $(find "$NK_SRC" -path '*nikki*' -path '*/arm64/*' -name '*.run' 2>/dev/null); do
             echo "  解包 $(basename "$r")"
             rm -rf /tmp/nk-unpack; mkdir -p /tmp/nk-unpack
             sh "$r" --target /tmp/nk-unpack --noexec >/dev/null 2>&1
             find /tmp/nk-unpack -name '*.apk' -exec cp -f {} "$NK_DST"/ \; 2>/dev/null
         done
+        # 兜底：若上游目录结构变化导致一个 generic 包都没取到，回退为全部架构（宁可多预置也不留空）
+        if ! ls "$NK_DST"/*.apk >/dev/null 2>&1; then
+            echo "  警告: 未取到 arm64(generic) 预置包，回退为全部架构"
+            find "$NK_SRC" -path '*nikki*' -name '*.apk' -exec cp -f {} "$NK_DST"/ \; 2>/dev/null
+        fi
     else
         echo "  警告: 无法克隆 wukongdaily/apk，跳过 Nikki 预置"
     fi
@@ -254,7 +262,7 @@ if [ "$ENABLE_NIKKI" = "1" ]; then
     ls -la "$NK_DST" 2>/dev/null
 
     # ---- 去重：同名包只保留最高版本 ----
-    # 上游仓库同时保留历史版本（如 luci-app-nikki-1.25.3 与 1.26.0、nikki-2026.03.10 与 2026.04.08），
+    # 上游仓库同一架构目录下也可能保留历史版本（如 luci-app-nikki 的多个版本），
     # 而首启 rc.local 执行 `apk add --allow-untrusted /usr/share/nikki-apk/*.apk`；
     # 同名多版本一次性安装会因包冲突导致首启安装失败，故此处按“包名”去重、仅保留版本最高者。
     if ls "$NK_DST"/*.apk >/dev/null 2>&1; then
