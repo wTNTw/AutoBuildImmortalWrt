@@ -98,7 +98,12 @@ PACKAGES="$PACKAGES sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn"
 # 注：upnp 的 LuCI 菜单项默认挂在「服务」下，已由 files/usr/share/luci/menu.d/luci-app-upnp.json
 #     改挂到「网络」菜单（覆盖同名菜单文件；title 保持原串不变，以便 luci-i18n-upnp-zh-cn 仍能汉化）
 PACKAGES="$PACKAGES miniupnpd-nftables luci-app-upnp luci-i18n-upnp-zh-cn"
-PACKAGES="$PACKAGES pbr luci-app-pbr luci-i18n-pbr-zh-cn"
+# 注：已移除 pbr / luci-app-pbr / luci-i18n-pbr-zh-cn（策略路由 / Policy Routing）
+#     理由：与已集成的 Nikki(mihomo) 规则分流在作用域上重叠——两者同时作用于同一流量时，
+#           nftables 标记/fwmark 与规则优先级易冲突，导致分流整体错乱；本机为单 WAN + mihomo
+#           分流场景，不需要 IP/端口层的粗粒度选路。imm25.config 中该项本就为 "not set"，
+#           此前是由本行显式拉入的，删除本行即可使固件不再包含该插件。
+#     （实机侧已同步 apk del，含其自动孤儿依赖 resolveip）
 
 # ========== DNS 广告过滤 (AdGuardHome) ==========
 # 均为官方源包（非第三方注入），已实测存在于 25.12.1 / aarch64_generic 源：
