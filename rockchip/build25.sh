@@ -363,6 +363,9 @@ fi
 # aarch64_generic 取，与 DISTRIB_ARCH 对齐。
 #
 # 统一收在下面两个函数里，避免每个插件各写一份：日后改目录约定或上游资产命名时只改一处。
+#
+# 完整的踩坑记录（资产格式、ucitrack 注册顺序、包自带 uci-defaults、依赖进 PACKAGES）见
+# docs/solutions/build/third-party-apk-preset-install.md —— 新增插件前建议先读一遍。
 preset_plugin_apks() {
     local name="$1" repo="$2" dst="$3"
     local tmp="/tmp/preset-apk-$name"
