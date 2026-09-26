@@ -568,6 +568,48 @@ if [ -d "$NIKKI_APK_DIR" ] && command -v apk >/dev/null 2>&1; then
     fi
 fi
 
+# 7) 安装预置的 netwizard（网络向导）apk
+# 机制与上面的 Nikki 相同：预置文件 + 首启 `apk add --allow-untrusted`。
+# 但这里比 Nikki 多两步，否则插件在「刷机后的第一次开机」里装了却不生效：
+#   a) apk 装包不会建 /etc/rc.d/S99netwizard，而 ucitrack 的 register_init 要求 init
+#      已经 enabled，否则直接跳过、不注册触发器（见 /etc/init.d/ucitrack）；
+#   b) ucitrack 在 S80 执行，早于本脚本（rc.local，S95done），这一轮不会再扫一次
+#      /usr/share/ucitrack/*.json。
+# 少了这两步，向导页里的「保存并应用」不会触发 netwizard，必须再重启一次才好用；
+# 补上之后效果与「该包在构建期就在镜像里」一致。
+NW_APK_DIR=/usr/share/netwizard-apk
+if [ -d "$NW_APK_DIR" ] && command -v apk >/dev/null 2>&1; then
+    if ! apk list --installed 2>/dev/null | grep -qE '^luci-app-netwizard-[0-9]'; then
+        echo "===== $(date) 安装预置 netwizard apk =====" >> "$SYSCTL_LOG"
+        apk add --allow-untrusted --no-network "$NW_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1 \
+            || apk add --allow-untrusted "$NW_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1
+        /etc/init.d/netwizard enable 2>/dev/null
+        /etc/init.d/ucitrack reload 2>/dev/null
+        nw_cnt=$(apk list --installed 2>/dev/null | grep -cE '^luci-(app|i18n)-netwizard')
+        echo "  结果: $nw_cnt/2 个 netwizard 相关包已安装（luci-app-netwizard / luci-i18n-netwizard-zh-cn）" >> "$SYSCTL_LOG"
+    fi
+fi
+
+# 8) 安装预置的 partexp（分区扩容）apk
+# 与上面同机制。比 netwizard 简单：该包没有 /etc/init.d、也没有 /usr/share/ucitrack，
+# 无需 enable 或重载 ucitrack；它自带的 /etc/uci-defaults/zzz_luci-app-partexp
+# （chmod +x /usr/bin/partexp /usr/libexec/rpcd/partexp + /etc/init.d/rpcd restart）
+# 会由 apk 的 default_postinst 在装包时自动执行并删除自身，因此这里不用再补。
+# 它的运行时依赖（parted / fdisk / btrfs-progs / f2fs-tools / resize2fs / kmod-loop 等）
+# 已在构建期进镜像，所以下面先试的 --no-network 安装就能成功，不必依赖联网补齐。
+# ⚠️ 该插件会写分区表 / 格式化 / 调整根分区；包内没有 init 脚本，开机不会自动动作，
+#    只有用户在 LuCI 里点按钮（ubus partexp.autopart）才会执行。
+PARTEXP_APK_DIR=/usr/share/partexp-apk
+if [ -d "$PARTEXP_APK_DIR" ] && command -v apk >/dev/null 2>&1; then
+    if ! apk list --installed 2>/dev/null | grep -qE '^luci-app-partexp-[0-9]'; then
+        echo "===== $(date) 安装预置 partexp apk =====" >> "$SYSCTL_LOG"
+        apk add --allow-untrusted --no-network "$PARTEXP_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1 \
+            || apk add --allow-untrusted "$PARTEXP_APK_DIR"/*.apk >> "$SYSCTL_LOG" 2>&1
+        pe_cnt=$(apk list --installed 2>/dev/null | grep -cE '^luci-(app|i18n)-partexp')
+        echo "  结果: $pe_cnt/2 个 partexp 相关包已安装（luci-app-partexp / luci-i18n-partexp-zh-cn）" >> "$SYSCTL_LOG"
+    fi
+fi
+
 exit 0
 EOF
 chmod +x /etc/boot-tuning.sh

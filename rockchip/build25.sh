@@ -64,6 +64,16 @@ PACKAGES="$PACKAGES kmod-btusb mt7921bt-firmware"
 # 存储与文件系统支持 (USB 自动挂载，NTFS/ext4/exFAT 原生驱动，磁盘维护工具)
 PACKAGES="$PACKAGES block-mount kmod-fs-ext4 kmod-fs-ntfs3 kmod-fs-exfat kmod-fs-vfat e2fsprogs kmod-usb-storage kmod-usb-storage-uas"
 
+# 分区扩容 partexp 的运行时依赖（插件本体走「预置 apk + 首启安装」，见下方 partexp 段落）
+# 该包声明 11 个依赖，其中 block-mount / e2fsprogs 上面已装；其余必须在这里进镜像，两条理由：
+#   1) 首启安装先试 `apk add --no-network`，缺依赖会直接失败并退化成联网安装；对刚刷完机、
+#      还没配好上网的设备，靠联网补齐并不可靠。
+#   2) kmod-loop 是内核模块，必须与内核版本严格匹配，只能经构建期 apk 安装
+#      （与上面 Nikki 内核依赖的处理同理）。
+# 包名已逐一核对，在 25.12.1 / aarch64_generic 官方源中都存在：blkid/losetup/fdisk 是
+# util-linux 的子包，resize2fs 是 e2fsprogs 的子包，但都作为独立包名发布，可直接写。
+PACKAGES="$PACKAGES fdisk bc blkid parted btrfs-progs losetup resize2fs f2fs-tools kmod-loop"
+
 # 内核与网络协议栈加速 (TCP BBR 拥塞控制支持)
 PACKAGES="$PACKAGES kmod-tcp-bbr"
 
@@ -81,6 +91,18 @@ ENABLE_OXIDNS=1
 # mihomo 核心随 nikki 包提供（/usr/libexec/nikki），不需要单独注入二进制。
 # 完整理由、包来源与首启安装逻辑见下方「Nikki（mihomo 代理，第三方）」段落。
 ENABLE_NIKKI=1
+
+# 集成 netwizard（网络向导，第三方）：交付方式与 Nikki 相同，同为「预置 .apk + 首次开机安装」。
+# ⚠️ 该向导一旦在 LuCI 里被使用，会按向导选项重写现有 network / wireless / dhcp 配置。
+#    预装本身不影响现有配置（其 init 的 boot() 直接 return），但请知悉这一点；
+#    完整理由、资产选择与真机兼容性证据见下方「netwizard（网络向导，第三方）」段落。
+ENABLE_NETWIZARD=1
+
+# 集成 partexp（分区扩容，第三方）：同为「预置 .apk + 首次开机安装」。
+# ⚠️ 该插件会写分区表 / 格式化 / 调整根分区，属高风险操作。包内**没有 init 脚本**，
+#    也没有 ucitrack 项，所以开机不会自动动作；只有用户在 LuCI 里显式点按钮
+#    （ubus partexp.autopart）才会执行。它的运行时依赖已在上面的 PACKAGES 段落装进镜像。
+ENABLE_PARTEXP=1
 
 # ========== 系统级优化组件 ==========
 # eMMC 寿命与 I/O：fstrim 定期 TRIM；zram-swap 为内存压缩交换，不写闪存
@@ -326,6 +348,84 @@ if [ "$ENABLE_NIKKI" = "1" ]; then
         echo "  警告: 预置包中没有 nikki-*.apk —— mihomo 核心随该包提供，缺失会导致"
         echo "        首启装完后 /usr/bin/mihomo 不可用，请检查上游仓库结构是否变化。"
     fi
+fi
+
+# ============ 第三方插件预置 apk（通用）============
+# 为什么不能在构建期装：25.12 是 apk，而 ImageBuilder 的本地 packages/ 目录只能经
+# packages.adb 索引被 apk 看到，该索引在本镜像里生成不了（详见上面 Nikki 段落）；
+# 而**设备端** `apk add --allow-untrusted <本地 .apk 文件>` 是可用的。因此统一做法是：
+# 把 .apk 预置进固件 → 首次开机由 /etc/boot-tuning.sh 安装（包会被 apk 正常登记，可升级卸载）。
+#
+# 取包时必须选对 release 资产 —— 两个 SDK 分支的**包格式不同**，选错设备直接装不上：
+#   SNAPSHOT-<arch>.tar.gz       -> 内含 .apk（apk-tools 3.x，本项目走这条）
+#   openwrt-24.10-<arch>.tar.gz  -> 内含 .ipk（opkg 用，本项目不取）
+# 这类插件多为 PKGARCH:=all（装入后标 noarch），各架构资产内容一致；这里仍按设备架构
+# aarch64_generic 取，与 DISTRIB_ARCH 对齐。
+#
+# 统一收在下面两个函数里，避免每个插件各写一份：日后改目录约定或上游资产命名时只改一处。
+preset_plugin_apks() {
+    local name="$1" repo="$2" dst="$3"
+    local tmp="/tmp/preset-apk-$name"
+    local url
+
+    echo "---- $name: 下载 release 并预置 apk ----"
+    mkdir -p "$dst"
+    rm -rf "$tmp"; mkdir -p "$tmp"
+
+    url=$(curl -s "https://api.github.com/repos/$repo/releases/latest" \
+          | grep "browser_download_url.*SNAPSHOT-aarch64_generic\.tar\.gz" | head -n1 | cut -d '"' -f 4)
+    if [ -z "$url" ]; then
+        echo "  ⚠️ $repo 的 release 资产里找不到 SNAPSHOT-aarch64_generic.tar.gz，固件将不含 $name"
+        return 0
+    fi
+    if ! wget -q "$url" -O "$tmp/rel.tar.gz" || ! tar -xzf "$tmp/rel.tar.gz" -C "$tmp"; then
+        echo "  ⚠️ $name release 下载或解包失败，固件将不含该插件"
+        return 0
+    fi
+    # 资产内部固定放在 packages_ci/ 下，故用 find 而不是写死路径
+    find "$tmp" -name '*.apk' -exec cp -f {} "$dst"/ \;
+    echo "---- $name 预置的 apk 清单 ----"
+    ls -la "$dst" 2>/dev/null
+}
+
+# 预置目录里最终没有预期的包时，提前把问题暴露在构建日志里 ——
+# 首启脚本只会安静地记一行日志跳过，不主动检查就会刷出「以为装了、其实没装」的固件。
+require_preset_apk() {
+    local name="$1" pattern="$2" dst="$3"
+    if ! ls "$dst"/$pattern >/dev/null 2>&1; then
+        echo "  ⚠️ $name 的预置目录里没有 $pattern，固件将不含该插件"
+    fi
+}
+
+# ---- netwizard（网络向导）----
+# ⚠️ 行为提示：该向导一旦在 LuCI 里被使用，会按向导选项重写现有 network / wireless / dhcp
+#    配置。预装本身不影响现有配置（其 init 的 boot() 直接 return），详见 99-custom.sh 的说明。
+# 兼容性实证（2026-09-26 读目标机：ImmortalWrt 25.12.1 r37978 / NanoPi R5C / apk-tools 3.0.5）：
+# 该机上已装着与本 release 同版本的包，说明这套 apk 在本项目的 apk 上可直接安装：
+#   luci-app-netwizard-2.1.5-r20260312              noarch  depends: libc
+#   luci-i18n-netwizard-zh-cn-26.060.49879~201cb64  noarch
+if [ "$ENABLE_NETWIZARD" = "1" ]; then
+    NW_DST=/home/build/immortalwrt/files/usr/share/netwizard-apk
+    preset_plugin_apks netwizard sirpdboy/luci-app-netwizard "$NW_DST"
+    require_preset_apk netwizard 'luci-app-netwizard-*.apk' "$NW_DST"
+fi
+
+# ---- partexp（分区扩容）----
+# 该包没有 /etc/init.d，也没有 /usr/share/ucitrack，所以首启安装后**不需要** enable 或注册触发器；
+# 它自带的 /etc/uci-defaults/zzz_luci-app-partexp（chmod +x 两个可执行文件 + rpcd restart）
+# 会由 apk 的 default_postinst 在装包时自动执行并删除自身（见 /lib/functions.sh 的
+# default_postinst：按本包 file list 匹配 /etc/uci-defaults/ 后逐条 source 再 rm）。
+# 注意该包 ship 的两个可执行文件权限是 0644，全靠那段 uci-defaults 补 +x；
+# 实机已验证这段确实跑到了（见下方实证），若日后 default_postinst 行为变化会表现为
+# 「包装上了但 ubus partexp 对象不出现」。
+# 兼容性实证（2026-09-26 读目标机，同 netwizard）：该机上已装着与本 release 同版本的包，
+# 且 /usr/bin/partexp 与 /usr/libexec/rpcd/partexp 均为 0755、`ubus -v list partexp` 已注册：
+#   luci-app-partexp-2.0.5-r20260318              noarch
+#   luci-i18n-partexp-zh-cn-25.355.34625~38e15b6  noarch
+if [ "$ENABLE_PARTEXP" = "1" ]; then
+    PE_DST=/home/build/immortalwrt/files/usr/share/partexp-apk
+    preset_plugin_apks partexp sirpdboy/luci-app-partexp "$PE_DST"
+    require_preset_apk partexp 'luci-app-partexp-*.apk' "$PE_DST"
 fi
 
 # 构建镜像
